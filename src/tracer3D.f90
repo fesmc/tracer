@@ -394,7 +394,7 @@ contains
 
         ! Activate new tracers if desired
         if (dep_now) call tracer_activate(trc%par,trc%now,x1,y1,H=H1,lat=lat1, &
-                                ux_srf=ux1(:,:,nx),uy_srf=uy1(:,:,ny),nmax=trc%par%n_max_dep)
+                                ux_srf=ux1(:,:,nz),uy_srf=uy1(:,:,nz),nmax=trc%par%n_max_dep)
 
         ! Finish activation for necessary points 
         do i = 1, trc%par%n 
@@ -515,13 +515,16 @@ contains
 !             p_init = gen_distribution_thickness(H,H_min=par%H_min_dep,alpha=par%alpha,dist=par%weight)
             p_init = gen_distribution_vel(uv=sqrt(ux_srf**2+uy_srf**2),H=H,uv_max=par%U_max_dep,H_min=par%H_min_dep)
 
-!             ! Additionally adjust distribution according to latitude 
-!             where (lat .lt. 70.0) 
-!                 p_init = 0.0 
-!             end where 
+!             ! Additionally adjust distribution according to latitude
+!             where (lat .lt. 70.0)
+!                 p_init = 0.0
+!             end where
 
-            ! Normalize p_init, just in case
-            p_init = p_init / sum(p_init)
+            ! gen_distribution_vel returns an already-normalized field, or all
+            ! zeros when no cell meets the deposition criteria (no ice above
+            ! H_min_dep, or all ice faster than U_max_dep). Renormalizing here
+            ! would divide by a zero sum, giving NaN and depositing nothing.
+            if (sum(p_init) .eq. 0.0) return
 
             ! Generate random numbers to populate points 
             allocate(jit(2,ntot))
@@ -689,10 +692,12 @@ contains
         real(prec) :: p_sum 
 
         
-        p = 0.0 
-        where (uv .gt. 0.0 .and. uv .lt. uv_max .and. H .gt. H_min)
-            p = 1.0 - uv/uv_max 
-        end where 
+        p = 0.0
+        ! Note: uv==0 must be included. Slow ice is the most likely deposition
+        ! site (p -> 1), and an ice divide has uv==0 exactly by symmetry.
+        where (uv .ge. 0.0 .and. uv .lt. uv_max .and. H .gt. H_min)
+            p = 1.0 - uv/uv_max
+        end where
 
         ! Normalize probability sum to one 
         p_sum = sum(p)
