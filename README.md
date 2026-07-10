@@ -52,10 +52,33 @@ make run-profile-analytic     # RH2003, one tracer at the divide, vs. the analyt
 make run-greenland            # 3D Greenland, forced from a 16 km Yelmo restart
 ```
 
-**RH2003** is the idealized ice-divide profile of Rybak & Huybrechts (2003).
-The analytic case deposits a single tracer at the divide, where the age profile
-has a closed-form solution — this is where quantitative accuracy is checked
-(see `plot_RH2003_analytic.r`).
+**RH2003** is the idealized ice-divide profile of Rybak & Huybrechts (2003)
+(`docs/rybak_and_huybrechts_2003.pdf`). The analytic case deposits a single
+tracer at the divide, where the age profile has a closed-form solution — this is
+where quantitative accuracy is checked.
+
+To reproduce the paper's figures, run the sweep and plot it:
+
+```bash
+./run_RH2003.sh               # build, run the sweep, write analysis/figures/
+./run_RH2003.sh --run-only    # runs only
+./run_RH2003.sh --plot-only   # plots only, from existing output/
+```
+
+This sweeps `dt` at the divide, and grid resolution and `interp_method` on the
+full profile, then writes three figures with `analysis/plot_RH2003.jl`
+(Julia; `julia --project=analysis`):
+
+| figure | compares against |
+|---|---|
+| `fig1_streamlines_age.png` | RH2003 Fig. 1: streamlines and the Lagrangian date field |
+| `fig2_divide_age.png` | RH2003 Fig. 2 and eq. 11: age at the divide vs. the Nye–Haefeli solution |
+| `fig3_age_error.png` | sensitivity of the age field to resolution and to linear vs. spline |
+
+Precision is a compile-time choice: `prec` in `src/tracer_precision.f90` is `sp`,
+and it is stamped into every output filename. For a double-precision sweep set
+`prec = dp`, `make clean && make profile`, and rerun — the `dp` outputs land
+beside the `sp` ones rather than over them.
 
 **Greenland** advects tracers through a Yelmo ice-sheet state on the 16 km
 grid, read from `data/initmip-grl-16km/yelmo_restart.nc`. The restart carries no
@@ -99,12 +122,23 @@ Set in the `&tracer_par` namelist group:
 | `dt`, `dt_dep`, `dt_write` | timestep; deposition and write intervals [a] |
 | `H_min`, `depth_max`, `U_max` | bounds beyond which a tracer is deactivated |
 | `H_min_dep`, `U_max_dep` | ice must be thicker / slower than this to deposit |
-| `weight` | deposition distribution: `vel`, `linear`, `quadratic`, `rand` |
-| `alpha` | slope of the probability function (`linear`, `quadratic` only) |
+| `weight` | deposition priority: `vel`, `linear`, `quadratic`, `rand` |
+| `alpha` | slope of the priority function (`linear`, `quadratic` only) |
 | `noise` | jitter the deposition location within its grid cell |
 | `seed` | RNG seed; positive is reproducible, `<= 0` defers to the OS |
 | `interp_method` | `linear` or `spline` |
 | `par_trans_file` | transient parameter table, or `"None"` |
+
+`weight` ranks cells rather than being sampled from: each deposition step takes
+the `n_max_dep` highest-ranked cells outright, so `vel` deposits into the
+slowest ice available and only reaches faster ice once every eligible cell holds
+a tracer. (`rand` is the exception — taking the maximum of a random field is
+equivalent to sampling.) Cells are eligible only where `H > H_min_dep` and the
+surface speed is below `U_max_dep`.
+
+`H_min_dep`, `dt_dep`, `dt_write` and `n_max_dep` are re-read from
+`par_trans_file` on every timestep when one is given, which silently overrides
+whatever the namelist set them to.
 
 A parameter named in the namelist but not read by the code is ignored; a
 parameter the code reads but the namelist omits is a hard error.
