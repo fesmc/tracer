@@ -27,12 +27,17 @@ program tracertest
     real(prec) :: time, time_start, time_end  
     logical    :: dep_now, write_now
 
-    prefix       = "RH2003"
-    fldr         = "output/"//trim(prefix)
-    filename_nml = trim(prefix)//".nml"
+    ! The namelist to run may be given as the first command-line argument, so
+    ! that the RH2003 and RH2003_analytic cases can be run without renaming
+    ! files over each other. Output lands in output/<namelist-stem>.
+    call get_command_argument(1,filename_nml)
+    if (len_trim(filename_nml) .eq. 0) filename_nml = "RH2003.nml"
 
-    ! Simulation parameters 
-    time_start = -160000.0 
+    prefix = nml_stem(filename_nml)
+    fldr   = "output/"//trim(prefix)
+
+    ! Simulation parameters
+    time_start = -160000.0
     time_end   = 0.0
 
     call calc_profile_RH2003(prof1,filename_nml)
@@ -73,7 +78,32 @@ program tracertest
 !     ! Write stats 
 !     call tracer2D_write_stats(trc1,time,fldr,filename_stats)
 
-contains 
+contains
+
+    function nml_stem(filename) result(stem)
+        ! Strip any directory prefix and the trailing ".nml" from a namelist
+        ! path, e.g. "cfg/RH2003_analytic.nml" -> "RH2003_analytic".
+
+        implicit none
+
+        character(len=*), intent(IN) :: filename
+        character(len=128) :: stem
+
+        integer :: i, n
+
+        stem = adjustl(filename)
+
+        i = index(stem,"/",back=.TRUE.)
+        if (i .gt. 0) stem = stem(i+1:)
+
+        n = len_trim(stem)
+        if (n .gt. 4) then
+            if (stem(n-3:n) .eq. ".nml") stem = stem(1:n-4)
+        end if
+
+        return
+
+    end function nml_stem
 
     subroutine calc_profile_RH2003(prof,filename)
         ! Define a 2D profile (x-z) following 

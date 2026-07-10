@@ -118,18 +118,53 @@ greenland: tracer-static
 	@echo "    $(bindir)/test_greenland.x is ready."
 	@echo " "
 
-.PHONY: all usage clean
+.PHONY: all usage clean check run-profile run-profile-analytic run-greenland
 all: profile greenland
+
+###############################################
+##
+## Running the benchmarks
+##
+## Each rule creates the output directory the program writes into; netCDF will
+## not create it, so a fresh clone cannot run the binary directly.
+##
+###############################################
+
+run-profile: profile
+	@mkdir -p output/RH2003
+	./$(bindir)/test_profile.x RH2003.nml
+
+run-profile-analytic: profile
+	@mkdir -p output/RH2003_analytic
+	./$(bindir)/test_profile.x RH2003_analytic.nml
+
+run-greenland: greenland
+	@mkdir -p output/GRL-16KM
+	./$(bindir)/test_greenland.x
+
+# Run every benchmark. Any of them failing (a missing namelist parameter, an
+# unreadable forcing file, zero tracers deposited) exits nonzero and fails here.
+check: run-profile-analytic run-profile run-greenland
+	@echo " "
+	@echo "    All benchmarks passed."
+	@echo " "
 
 usage:
 	@echo ""
 	@echo "    * USAGE * "
 	@echo ""
-	@echo " make tracer-static : compiles the static library libtracer.a"
-	@echo " make profile       : compiles test_profile.x, the RH2003 idealized profile benchmark"
-	@echo " make greenland     : compiles test_greenland.x, the 3D Greenland benchmark"
-	@echo " make all           : compiles both benchmark programs"
-	@echo " make clean         : cleans object files and programs"
+	@echo " make tracer-static         : compiles the static library libtracer.a"
+	@echo " make profile               : compiles test_profile.x, the RH2003 idealized profile benchmark"
+	@echo " make greenland             : compiles test_greenland.x, the 3D Greenland benchmark"
+	@echo " make all                   : compiles both benchmark programs"
+	@echo ""
+	@echo " make run-profile           : runs the RH2003 benchmark (velocity-weighted deposition)"
+	@echo " make run-profile-analytic  : runs the RH2003 analytic case (one tracer at the divide)"
+	@echo " make run-greenland         : runs the 3D Greenland benchmark"
+	@echo " make check                 : runs all benchmarks; nonzero exit on any failure"
+	@echo ""
+	@echo " make clean                 : cleans object files and programs"
+	@echo " Add debug=1 to any build for bounds checking and floating-point traps."
 	@echo ""
 
 clean:
