@@ -25,9 +25,7 @@ program tracertest
     
     integer :: k, kmax, q 
     real(prec) :: time, time_start, time_end  
-    logical    :: dep_now, write_now   
-
-    real(prec), allocatable :: dep_val(:) 
+    logical    :: dep_now, write_now
 
     prefix       = "RH2003"
     fldr         = "output/"//trim(prefix)
@@ -46,24 +44,18 @@ program tracertest
     prof1%filename = gen_filename(prof1,trc1%par%dt)
     call tracer2D_write_init(trc1,fldr,prof1%filename)
 
-    ! Allocate a filler dep vector 
-    allocate(dep_val(prof1%nx))
-    dep_val = 0.0 
+    do k = 1, int((time_end-time_start)/trc1%par%dt)+1
 
-    do k = 1, int((time_end-time_start)/trc1%par%dt)+1 
-
-        time = time_start + trc1%par%dt*(k-1) 
-
-        dep_val = time 
+        time = time_start + trc1%par%dt*(k-1)
 
         dep_now  = .FALSE.
-        if (mod(time,trc1%par%dt_dep) .eq. 0.0) dep_now = .TRUE. 
+        if (mod(time,trc1%par%dt_dep) .eq. 0.0) dep_now = .TRUE.
 
+        ! This idealized profile carries no climate forcing, so the optional
+        ! deposition tagging fields are omitted; they are recorded as MV.
         call tracer2D_update(trc1,time=real(time,prec_time), &
                              x=prof1%xc,z=prof1%sigma,z_srf=prof1%H,H=prof1%H, &
                              ux=prof1%ux,uz=prof1%uz, &
-                             lon=dep_val,lat=dep_val,t2m_ann=dep_val,t2m_sum=dep_val,&
-                             pr_ann=dep_val,pr_sum=dep_val,d18O_ann=dep_val, &
                              dep_now=dep_now,stats_now=.FALSE.)
 
         write_now = .FALSE. 

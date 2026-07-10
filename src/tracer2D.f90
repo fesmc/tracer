@@ -52,8 +52,14 @@ contains
         real(prec), intent(IN) :: x(:), z(:)
         real(prec), intent(IN) :: z_srf(:), H(:)
         real(prec), intent(IN) :: ux(:,:), uz(:,:)
-        real(prec), intent(IN) :: lon(:), lat(:), t2m_ann(:), t2m_sum(:), pr_ann(:), pr_sum(:), d18O_ann(:)
-        logical,    intent(IN) :: dep_now, stats_now 
+
+        ! Deposition tagging fields, all optional (see tracer_update).
+        real(prec), intent(IN), optional :: lon(:), lat(:)
+        real(prec), intent(IN), optional :: t2m_ann(:), t2m_sum(:)
+        real(prec), intent(IN), optional :: pr_ann(:), pr_sum(:)
+        real(prec), intent(IN), optional :: d18O_ann(:)
+
+        logical,    intent(IN) :: dep_now, stats_now
 
         ! Local variables
         real(prec) :: y(2) 
@@ -72,36 +78,39 @@ contains
         allocate(ux_3D(size(ux,1),ny,size(ux,2)))
         allocate(uy_3D(size(ux,1),ny,size(ux,2)))
         allocate(uz_3D(size(ux,1),ny,size(ux,2)))
-        allocate(lon_2D(size(x,1),ny))
-        allocate(lat_2D(size(x,1),ny))
-        allocate(t2m_ann_2D(size(x,1),ny))
-        allocate(t2m_sum_2D(size(x,1),ny))
-        allocate(pr_ann_2D(size(x,1),ny))
-        allocate(pr_sum_2D(size(x,1),ny))
-        allocate(d18O_ann_2D(size(x,1),ny))
-        
+        ! An omitted tagging field is left unallocated. Passing an unallocated
+        ! allocatable to tracer_update's optional dummy makes it absent there,
+        ! so absence propagates through this wrapper.
+        if (present(lon))      allocate(lon_2D(size(x,1),ny))
+        if (present(lat))      allocate(lat_2D(size(x,1),ny))
+        if (present(t2m_ann))  allocate(t2m_ann_2D(size(x,1),ny))
+        if (present(t2m_sum))  allocate(t2m_sum_2D(size(x,1),ny))
+        if (present(pr_ann))   allocate(pr_ann_2D(size(x,1),ny))
+        if (present(pr_sum))   allocate(pr_sum_2D(size(x,1),ny))
+        if (present(d18O_ann)) allocate(d18O_ann_2D(size(x,1),ny))
+
         ! Set y-dimension to one value of zero
-        y(1:2) = [0.0,1.0] 
+        y(1:2) = [0.0,1.0]
 
         ! Reshape input data with a ghost y-dimension of length two
         do j = 1, size(y)
 
-            z_srf_2D(:,j)    = z_srf 
-            H_2D(:,j)        = H 
+            z_srf_2D(:,j)    = z_srf
+            H_2D(:,j)        = H
 
-            ux_3D(:,j,:)     = ux 
-            uy_3D            = 0.0 
-            uz_3D(:,j,:)     = uz 
+            ux_3D(:,j,:)     = ux
+            uy_3D            = 0.0
+            uz_3D(:,j,:)     = uz
 
-            lon_2D(:,j)      = lon 
-            lat_2D(:,j)      = lat 
-            t2m_ann_2D(:,j)  = t2m_ann 
-            t2m_sum_2D(:,j)  = t2m_sum 
-            pr_ann_2D(:,j)   = pr_ann 
-            pr_sum_2D(:,j)   = pr_sum 
-            d18O_ann_2D(:,j) = d18O_ann 
-            
-        end do 
+            if (present(lon))      lon_2D(:,j)      = lon
+            if (present(lat))      lat_2D(:,j)      = lat
+            if (present(t2m_ann))  t2m_ann_2D(:,j)  = t2m_ann
+            if (present(t2m_sum))  t2m_sum_2D(:,j)  = t2m_sum
+            if (present(pr_ann))   pr_ann_2D(:,j)   = pr_ann
+            if (present(pr_sum))   pr_sum_2D(:,j)   = pr_sum
+            if (present(d18O_ann)) d18O_ann_2D(:,j) = d18O_ann
+
+        end do
 
         ! Now update tracers using 3D call 
         call tracer_update(trc,time,x,y,z,z_srf_2D,H_2D,ux_3D,uy_3D,uz_3D, &

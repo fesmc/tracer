@@ -207,8 +207,16 @@ contains
         real(prec), intent(IN) :: x(:), y(:), z(:)
         real(prec), intent(IN) :: z_srf(:,:), H(:,:)
         real(prec), intent(IN) :: ux(:,:,:), uy(:,:,:), uz(:,:,:)
-        real(prec), intent(IN) :: lon(:,:), lat(:,:), t2m_ann(:,:), t2m_sum(:,:), pr_ann(:,:), pr_sum(:,:), d18O_ann(:,:) 
-        logical, intent(IN) :: dep_now, stats_now  
+
+        ! Deposition tagging fields. All optional: a caller that only wants to
+        ! advect particles need not synthesize climate forcing. Any field left
+        ! out is recorded as MV in trc%dep.
+        real(prec), intent(IN), optional :: lon(:,:), lat(:,:)
+        real(prec), intent(IN), optional :: t2m_ann(:,:), t2m_sum(:,:)
+        real(prec), intent(IN), optional :: pr_ann(:,:), pr_sum(:,:)
+        real(prec), intent(IN), optional :: d18O_ann(:,:)
+
+        logical, intent(IN) :: dep_now, stats_now
         character(len=*), intent(IN), optional :: order 
         real(prec), intent(IN), optional :: sigma_srf     ! Value at surface by default (1 or 0?)
 
@@ -285,17 +293,18 @@ contains
         call tracer_reshape3D_field(idx_order,uy,uy1,rev_z=rev_z)
         call tracer_reshape3D_field(idx_order,uz,uz1,rev_z=rev_z)
         
-        if (dep_now) then 
-            ! Also reshape deposition fields 
-            call tracer_reshape2D_field(idx_order,lon,lon1)
-            call tracer_reshape2D_field(idx_order,lat,lat1)
-            call tracer_reshape2D_field(idx_order,t2m_ann,t2m_ann1)
-            call tracer_reshape2D_field(idx_order,t2m_sum,t2m_sum1)
-            call tracer_reshape2D_field(idx_order,pr_ann,pr_ann1)
-            call tracer_reshape2D_field(idx_order,pr_sum,pr_sum1)
-            call tracer_reshape2D_field(idx_order,d18O_ann,d18O_ann1)
-            
-        end if 
+        if (dep_now) then
+            ! Also reshape deposition fields. H1 is already reshaped, so it
+            ! gives the (nx,ny) shape to fall back on for an absent field.
+            call reshape2D_optional(idx_order,lon1,     size(H1,1),size(H1,2),lon)
+            call reshape2D_optional(idx_order,lat1,     size(H1,1),size(H1,2),lat)
+            call reshape2D_optional(idx_order,t2m_ann1, size(H1,1),size(H1,2),t2m_ann)
+            call reshape2D_optional(idx_order,t2m_sum1, size(H1,1),size(H1,2),t2m_sum)
+            call reshape2D_optional(idx_order,pr_ann1,  size(H1,1),size(H1,2),pr_ann)
+            call reshape2D_optional(idx_order,pr_sum1,  size(H1,1),size(H1,2),pr_sum)
+            call reshape2D_optional(idx_order,d18O_ann1,size(H1,1),size(H1,2),d18O_ann)
+
+        end if
 
         ! Get axis sizes (if ny==2, this is a 2D profile domain) 
         nx = size(x1,1)
@@ -429,15 +438,27 @@ contains
                 trc%dep%y(i)    = trc%now%y(i)
                 trc%dep%z(i)    = trc%now%z(i) 
 
-                trc%dep%lon(i)  = interp_bilinear(par_lin,lon1)
-                trc%dep%lat(i)  = interp_bilinear(par_lin,lat1)
+                ! An absent tagging field is recorded as MV rather than
+                ! interpolated from a placeholder array.
+                trc%dep%lon(i)      = MV
+                trc%dep%lat(i)      = MV
+                trc%dep%t2m_ann(i)  = MV
+                trc%dep%t2m_sum(i)  = MV
+                trc%dep%pr_ann(i)   = MV
+                trc%dep%pr_sum(i)   = MV
+                trc%dep%d18O_ann(i) = MV
 
-                trc%dep%t2m_ann(i)   = interp_bilinear(par_lin,t2m_ann1)
-                trc%dep%t2m_sum(i)   = interp_bilinear(par_lin,t2m_sum1)
-                trc%dep%pr_ann(i)    = interp_bilinear(par_lin,pr_ann1)
-                trc%dep%pr_sum(i)    = interp_bilinear(par_lin,pr_sum1)
+                if (present(lon))      trc%dep%lon(i)      = interp_bilinear(par_lin,lon1)
+                if (present(lat))      trc%dep%lat(i)      = interp_bilinear(par_lin,lat1)
+                if (present(t2m_ann))  trc%dep%t2m_ann(i)  = interp_bilinear(par_lin,t2m_ann1)
+                if (present(t2m_sum))  trc%dep%t2m_sum(i)  = interp_bilinear(par_lin,t2m_sum1)
+                if (present(pr_ann))   trc%dep%pr_ann(i)   = interp_bilinear(par_lin,pr_ann1)
+                if (present(pr_sum))   trc%dep%pr_sum(i)   = interp_bilinear(par_lin,pr_sum1)
+                if (present(d18O_ann)) trc%dep%d18O_ann(i) = interp_bilinear(par_lin,d18O_ann1)
+
+                ! Precip-weighted temperature is a derived field, not an input.
+                ! == TO DO == compute from t2m/pr rather than leaving it MV.
                 trc%dep%t2m_prann(i) = MV
-                trc%dep%d18O_ann(i)  = MV
 
                 trc%now%active(i) = 2 
 
@@ -1298,6 +1319,36 @@ contains
         return
 
     end subroutine tracer_deallocate_stats
+
+    subroutine reshape2D_optional(idx_order,var1,nx,ny,var)
+        ! Reshape an optional deposition tagging field. When the caller omitted
+        ! it, produce an (nx,ny) field of MV instead, so downstream code has a
+        ! correctly-shaped array to work with. An absent optional dummy may be
+        ! passed straight through to another optional dummy, so this is called
+        ! unconditionally.
+
+        implicit none
+
+        character(len=*), intent(IN) :: idx_order
+        real(prec), intent(INOUT), allocatable :: var1(:,:)
+        integer,    intent(IN) :: nx, ny
+        real(prec), intent(IN), optional :: var(:,:)
+
+        if (present(var)) then
+
+            call tracer_reshape2D_field(idx_order,var,var1)
+
+        else
+
+            if (allocated(var1)) deallocate(var1)
+            allocate(var1(nx,ny))
+            var1 = MV
+
+        end if
+
+        return
+
+    end subroutine reshape2D_optional
 
     subroutine tracer_reshape1D_vec(var,var1,rev)
 
