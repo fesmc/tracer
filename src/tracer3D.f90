@@ -112,6 +112,7 @@ module tracer3D
     public :: tracer_reshape1D_vec
     public :: tracer_reshape2D_field
     public :: tracer_reshape3D_field
+    public :: which
 
     ! General public 
     public :: tracer_class 
