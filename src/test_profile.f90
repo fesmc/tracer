@@ -46,7 +46,7 @@ program tracertest
     ! Initialize tracer and output file 
     call tracer2D_init(trc1,filename_nml,time=real(time_start,prec_time),x=prof1%xc,is_sigma=.TRUE.)
 
-    prof1%filename = gen_filename(prof1,trc1%par%dt)
+    prof1%filename = gen_filename(prof1,trc1%par%dt,trc1%par%interp_method)
     call tracer2D_write_init(trc1,fldr,prof1%filename)
 
     do k = 1, int((time_end-time_start)/trc1%par%dt)+1
@@ -232,19 +232,20 @@ contains
 
     end subroutine calc_profile_RH2003
 
-    function gen_filename(prof,dt) result(filename)
+    function gen_filename(prof,dt,interp_method) result(filename)
 
-        implicit none 
+        implicit none
 
-        type(profile_class), intent(IN) :: prof 
-        real(prec_wrt),      intent(IN) :: dt 
-        character(len=512) :: filename 
+        type(profile_class), intent(IN) :: prof
+        real(prec_wrt),      intent(IN) :: dt
+        character(len=*),    intent(IN) :: interp_method
+        character(len=512) :: filename
 
-        character(len=5) :: str_nx, str_nz, str_prec, str_dt 
+        character(len=5) :: str_nx, str_nz, str_prec, str_dt
 
         write(str_nx,"(i5)") prof%nx
-        str_nx = adjustl(str_nx) 
-        write(str_nz,"(i5)") prof%nz 
+        str_nx = adjustl(str_nx)
+        write(str_nz,"(i5)") prof%nz
         str_nz = adjustl(str_nz)
         write(str_prec,*) "sp"
         if (kind(1.d0)==prec) write(str_prec,*) "dp"
@@ -253,16 +254,18 @@ contains
         write(str_dt,"(f5.1)") dt
         str_dt = adjustl(str_dt)
 
-        ! Generate filename based on parameter values 
-        write(filename,"(a,a,a1,a,a1,f4.2,a1,f4.2,a1,a,a1,a,a3)") &
+        ! Generate filename based on parameter values. interp_method is part of
+        ! the stem so that a linear and a spline run of the same configuration
+        ! do not overwrite each other.
+        write(filename,"(a,a,a1,a,a1,f4.2,a1,f4.2,a1,a,a1,a,a1,a,a3)") &
             "RH2003_", trim(str_nx), "_", trim(str_nz),"_", prof%G, "_", prof%B,"_", &
-            trim(str_prec),"_",trim(str_dt),".nc"
+            trim(str_prec),"_",trim(interp_method),"_",trim(str_dt),".nc"
 
         write(*,*) "Filename: ", trim(filename)
 
-        return 
+        return
 
-    end function gen_filename 
+    end function gen_filename
 
     subroutine profile_write(prof,fldr,filename)
 
