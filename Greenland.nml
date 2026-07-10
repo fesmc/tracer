@@ -1,21 +1,33 @@
-
 &tracer_par
+    dt        = 10.0
     n         = 5000
     n_max_dep = 100
+    dt_dep    = 500.0
+    dt_write  = 1000.0
 
-    thk_min   = 1e-2            ! m (minimum thickness of tracer 'layer')
-    H_min     = 1500.0          ! m 
+    H_min     = 1000.0          ! m
     depth_max = 0.99            ! fraction of thickness
-    U_max     = 200.0           ! m/a 
+    U_max     = 200.0           ! m/a
 
-    H_min_dep = 1000.0          ! m 
-    alpha     = 1.0 
-    dist      = "linear"
-    noise     = True 
-    
-    dens_z_lim = 50.0           ! m
-    dens_max   = 10             ! Number of points
+    U_max_dep =  40.0           ! m/a
+    H_min_dep = 1000.0          ! m
+    alpha     = 1.0             ! Only used by weight = linear, quadratic
+    weight    = "vel"           ! vel, linear, quadratic, rand
+    noise     = True
 
-    ! Method 
-    interp_method = "spline"    ! "linear" or "spline"
+    ! Method
+    interp_method = "linear"    ! "linear" or "spline"
+
+    par_trans_file = "None"
+
+/
+
+&grl_par
+    file_topo    = "data/GRL-16KM_TOPO-M17-v5.nc"
+    file_restart = "data/initmip-grl-16km/yelmo_restart.nc"
+
+    time_index   = 1            ! Index along the restart's time dimension
+    time_start   = -10000.0     ! [a]
+    time_end     = 0.0          ! [a]
+
 /
