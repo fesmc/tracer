@@ -110,7 +110,7 @@ module tracer3D
     public :: tracer_stats_class
 
     public :: tracer_reshape1D_vec
-    public :: tracer_reshape2D_field 
+    public :: tracer_reshape2D_field
     public :: tracer_reshape3D_field
 
     ! General public 
@@ -396,7 +396,15 @@ contains
                            trc%now%ax,trc%now%ay,trc%now%az,trc%now%dt,trc%now%active)
 
 !         call calc_position(trc%now%x,trc%now%y,trc%now%dpth,trc%now%ux,trc%now%uy,-trc%now%uz,trc%now%dt,trc%now%active)
-        trc%now%dpth = max(trc%now%z_srf - trc%now%z, 0.0) 
+
+        ! Depth below the surface, for active points only. An inactive point has
+        ! z_srf == z == MV, whose difference would otherwise clamp to a depth of
+        ! zero and read as a particle sitting at the surface.
+        where (trc%now%active .ne. 0)
+            trc%now%dpth = max(trc%now%z_srf - trc%now%z, 0.0)
+        elsewhere
+            trc%now%dpth = MV
+        end where
 
         ! Destroy points that moved outside the valid region 
         call tracer_deactivate(trc,x1,y1,maxval(H1))
