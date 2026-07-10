@@ -1,6 +1,25 @@
 .DS_Store
 *.dSYM
-libtracer
+
+# Compiler artifacts, wherever they land
+*.o
+*.mod
+*.a
+*.so
+*.x
+
+# Build output tree and figure/result dirs. Their .gitkeep files are tracked so
+# the directory skeleton survives a fresh clone (the Makefile writes into
+# libtracer/include and libtracer/bin without creating them).
+libtracer/**
+!libtracer/**/
+!libtracer/**/.gitkeep
+plots/**
+!plots/**/
+!plots/**/.gitkeep
+
 output
-plots
 profiles
+
+# Ad-hoc/debug logs
+logs/
