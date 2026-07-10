@@ -170,4 +170,4 @@ usage:
 clean:
 	rm -f $(bindir)/*.x
 	rm -f *.x gmon.out $(objdir)/*.o $(objdir)/*.mod $(objdir)/*.a $(objdir)/*.so
-	rm -rf *.x.dSYM
+	rm -rf *.x.dSYM $(bindir)/*.x.dSYM
