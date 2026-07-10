@@ -5,24 +5,20 @@
     dt_dep    =  500.0 
     dt_write  =  500.0 
     
-    thk_min   = 1e-2            ! m (minimum thickness of tracer 'layer')
-    H_min     = 3000.0          ! m 
+    H_min     = 3000.0          ! m
     depth_max = 0.99            ! fraction of thickness
-    U_max     = 200.0           ! m/a 
-    
-    U_max_dep =  40.0           ! m/a 
-    H_min_dep = 3595.0          ! m 
-    alpha     = 1.0 
-    dist      = "linear"
-    noise     = False 
+    U_max     = 200.0           ! m/a
 
-    dens_z_lim = 50.0           ! m
-    dens_max   = 10             ! Number of points
-    
-    ! Method 
+    U_max_dep =  40.0           ! m/a
+    H_min_dep = 3595.0          ! m (admits only the divide, where H is largest)
+    alpha     = 1.0             ! Only used by weight = linear, quadratic
+    weight    = "linear"        ! vel, linear, quadratic, rand
+    noise     = False
+
+    ! Method
     interp_method = "linear"    ! "linear" or "spline"
 
-    par_trans_file = None
+    par_trans_file = "None"
     
 /
 

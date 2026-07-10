@@ -22,19 +22,16 @@ module tracer3D
     type tracer_par_class 
         integer :: n, n_active, n_max_dep, id_max 
         logical :: is_sigma                     ! Is the defined z-axis in sigma coords
-        real(prec_time) :: dt, dt_dep, dt_write 
-        real(prec) :: thk_min                   ! Minimum thickness of tracer (m)
+        real(prec_time) :: dt, dt_dep, dt_write
         real(prec) :: H_min                     ! Minimum ice thickness to track (m)
         real(prec) :: depth_max                 ! Maximum depth of tracer (fraction)
         real(prec) :: U_max                     ! Maximum horizontal velocity of tracer to track (m/a)
         real(prec) :: U_max_dep                 ! Maximum horizontal velocity allowed for tracer deposition (m/a)
         real(prec) :: H_min_dep                 ! Minimum ice thickness for tracer deposition (m)
-        real(prec) :: alpha                     ! Slope of probability function
-        character(len=56) :: weight             ! Weighting function for generating prob. distribution
+        real(prec) :: alpha                     ! Slope of probability function ("linear"/"quadratic" weights)
+        character(len=56) :: weight             ! Deposition prob. distribution: vel, linear, quadratic, rand
         logical    :: noise                     ! Add noise to gridded deposition location
-        real(prec) :: dens_z_lim                ! Distance from surface to count density
-        integer    :: dens_max                  ! Max allowed density of particles at surface
-        character(len=56) :: interp_method  
+        character(len=56) :: interp_method
 
         ! Transient parameters 
         character(len=512) :: par_trans_file 
@@ -258,7 +255,7 @@ contains
             if (minval(zc) .lt. 0.0 .or. maxval(zc) .gt. 1.0) then 
                 write(0,*) "tracer:: error: sigma axis not bounded between zero and one."
                 write(0,*) "z = ", zc 
-                stop 
+                error stop
             end if
 
         end if 
@@ -379,10 +376,13 @@ contains
 
         end do 
 
-        ! Update the tracer thickness, then destroy points that are too thin 
-        ! == TO DO == 
+        ! Update the tracer thickness, then destroy points that are too thin
+        ! == TO DO ==
+        ! Unimplemented. The `thk_min` namelist parameter that would control it
+        ! was removed rather than left as a knob that silently does nothing;
+        ! restore it here when this is written.
 
-        ! Update the tracer positions 
+        ! Update the tracer positions
         call calc_position(trc%now%x,trc%now%y,trc%now%z,trc%now%ux,trc%now%uy,trc%now%uz, &
                            trc%now%ax,trc%now%ay,trc%now%az,trc%now%dt,trc%now%active)
 
@@ -501,7 +501,7 @@ contains
         integer :: ntot  
         real(prec) :: p(size(H,1),size(H,2)), p_init(size(H,1),size(H,2))
         integer :: i, j, k, ij(2)
-        real(prec), allocatable :: jit(:,:), dens(:,:)
+        real(prec), allocatable :: jit(:,:)
         real(prec) :: xmin, ymin, xmax, ymax 
 
         ! How many points can be activated?
@@ -511,14 +511,34 @@ contains
         if (ntot .gt. 0) then 
             ! Proceed with activation, since points are available 
 
-            ! Determine initial desired distribution of points on low resolution grid
-!             p_init = gen_distribution_thickness(H,H_min=par%H_min_dep,alpha=par%alpha,dist=par%weight)
-            p_init = gen_distribution_vel(uv=sqrt(ux_srf**2+uy_srf**2),H=H,uv_max=par%U_max_dep,H_min=par%H_min_dep)
+            ! Determine initial desired distribution of points on low resolution grid.
+            ! par%weight is validated in tracer_par_load.
+            select case(trim(par%weight))
+
+                case("vel")
+                    ! Weight by surface velocity: slow ice is the likeliest site
+                    p_init = gen_distribution_vel(uv=sqrt(ux_srf**2+uy_srf**2),H=H, &
+                                                  uv_max=par%U_max_dep,H_min=par%H_min_dep)
+
+                case DEFAULT
+                    ! Weight by ice thickness ("linear", "quadratic" or "rand")
+                    p_init = gen_distribution_thickness(H,H_min=par%H_min_dep, &
+                                                        alpha=par%alpha,dist=par%weight)
+
+            end select
 
 !             ! Additionally adjust distribution according to latitude
 !             where (lat .lt. 70.0)
 !                 p_init = 0.0
 !             end where
+
+            ! == TO DO ==
+            ! Cap the density of existing particles near the surface, so that
+            ! p_init is suppressed where too many tracers already sit within
+            ! some distance of the surface. The `dens_z_lim` / `dens_max`
+            ! namelist parameters that would control it were removed rather
+            ! than left as knobs that silently do nothing; restore them here
+            ! when this is written.
 
             ! gen_distribution_vel returns an already-normalized field, or all
             ! zeros when no cell meets the deposition criteria (no ice above
@@ -718,23 +738,37 @@ contains
 
         ! Local variables
         integer    :: k, ij(2)
-        real(prec) :: p_sum 
+        real(prec) :: p_sum, H_range
 
-        select case(trim(dist)) 
+        ! No cell is thick enough to deposit into. Return an all-zero field;
+        ! the caller treats a zero sum as "no valid deposition sites". This
+        ! also guards the division by H_range below.
+        H_range = maxval(H) - H_min
+        if (H_range .le. 0.0) then
+            p = 0.0
+            return
+        end if
+
+        select case(trim(dist))
 
             case("linear")
 
-                p = (alpha * max(H-H_min,0.0) / (maxval(H)-H_min))
+                p = (alpha * max(H-H_min,0.0) / H_range)
 
             case("quadratic")
 
-                p = (alpha * max(H-H_min,0.0) / (maxval(H)-H_min))**2
+                p = (alpha * max(H-H_min,0.0) / H_range)**2
 
-            case DEFAULT   ! "rand"
+            case("rand")
 
                 ! Random even distribution (all points equally likely)
                 call random_number(p)
-                where (H .lt. H_min) p = 0.0 
+                where (H .le. H_min) p = 0.0
+
+            case DEFAULT
+
+                write(0,*) "gen_distribution_thickness:: error: unknown dist: "//trim(dist)
+                error stop
 
 
         end select 
@@ -947,27 +981,11 @@ contains
         character(len=*),       intent(IN)  :: filename 
         logical, intent(IN) :: is_sigma 
 
-!         par%n         = 5000
-!         par%n_max_dep = 100
-        
-!         par%thk_min   = 1e-2   ! m (minimum thickness of tracer 'layer')
-!         par%H_min     = 1500.0 ! m 
-!         par%depth_max = 0.99   ! fraction of thickness
-!         par%U_max     = 200.0  ! m/a 
-
-!         par%H_min_dep = 1000.0 ! m 
-!         par%alpha     = 1.0 
-!         par%weight    = "linear"
-        
-!         par%dens_z_lim = 50.0 ! m
-!         par%dens_max   = 10   ! Number of points
-        
         call nml_read(filename,"tracer_par","dt",            par%dt)
         call nml_read(filename,"tracer_par","n",             par%n)
         call nml_read(filename,"tracer_par","n_max_dep",     par%n_max_dep)
         call nml_read(filename,"tracer_par","dt_dep",        par%dt_dep)
         call nml_read(filename,"tracer_par","dt_write",      par%dt_write)
-        call nml_read(filename,"tracer_par","thk_min",       par%thk_min)
         call nml_read(filename,"tracer_par","H_min",         par%H_min)
         call nml_read(filename,"tracer_par","depth_max",     par%depth_max)
         call nml_read(filename,"tracer_par","U_max",         par%U_max)
@@ -976,8 +994,6 @@ contains
         call nml_read(filename,"tracer_par","alpha",         par%alpha)
         call nml_read(filename,"tracer_par","weight",        par%weight)
         call nml_read(filename,"tracer_par","noise",         par%noise)
-        call nml_read(filename,"tracer_par","dens_z_lim",    par%dens_z_lim)
-        call nml_read(filename,"tracer_par","dens_max",      par%dens_max)
         call nml_read(filename,"tracer_par","interp_method", par%interp_method)
         call nml_read(filename,"tracer_par","par_trans_file",par%par_trans_file)
     
@@ -992,13 +1008,22 @@ contains
             call tracer_par_trans_load(par%tpar,par%par_trans_file)
         end if 
 
-        ! Consistency checks 
+        ! Consistency checks
         if (trim(par%interp_method) .ne. "linear" .and. &
-            trim(par%interp_method) .ne. "spline" ) then 
+            trim(par%interp_method) .ne. "spline" ) then
             write(0,*) "tracer_init:: error: interp_method must be 'linear' &
             &or 'spline': "//trim(par%interp_method)
-            stop 
-        end if 
+            error stop
+        end if
+
+        if (trim(par%weight) .ne. "vel"       .and. &
+            trim(par%weight) .ne. "linear"    .and. &
+            trim(par%weight) .ne. "quadratic" .and. &
+            trim(par%weight) .ne. "rand" ) then
+            write(0,*) "tracer_init:: error: weight must be 'vel', 'linear', &
+            &'quadratic' or 'rand': "//trim(par%weight)
+            error stop
+        end if
 
 
         return 
@@ -1342,7 +1367,7 @@ contains
 
                 write(0,*) "tracer_reshape2D_field:: error: unrecognized array order: ",trim(idx_order)
                 write(0,*) "    Possible choices are: ijk, kji"
-                stop  
+                error stop
 
         end select 
 
@@ -1417,7 +1442,7 @@ contains
 
                 write(0,*) "tracer_reshape3D_field:: error: unrecognized array order: ",trim(idx_order)
                 write(0,*) "    Possible choices are: ijk, kji"
-                stop  
+                error stop
 
         end select 
 

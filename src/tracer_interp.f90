@@ -273,7 +273,7 @@ contains
         
         if (bspline_flag .ne. 0) then 
             write(*,*) "interp_bspline3D_weights:: error initializing."
-            stop 
+            error stop
         end if     
 
         return 
@@ -301,7 +301,7 @@ contains
 
         if (bspline_flag .ne. 0) then 
             write(*,*) "interp_bspline3D:: error interpolating."
-            stop 
+            error stop
         end if     
 
         var = var_dbl 

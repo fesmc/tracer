@@ -5,21 +5,17 @@
     dt_dep    = 500.0 
     dt_write  = 5000.0 
     
-    thk_min   = 1e-2            ! m (minimum thickness of tracer 'layer')
-    H_min     = 1.0             ! m 
+    H_min     = 1.0             ! m
     depth_max = 0.99            ! fraction of thickness
-    U_max     = 200.0           ! m/a 
-    
-    U_max_dep =  40.0           ! m/a 
-    H_min_dep = 100.0           ! m 
-    alpha     = 1.0 
-    weight    = "rand"          ! linear, quadratic, rand
-    noise     = True 
+    U_max     = 200.0           ! m/a
 
-    dens_z_lim = 50.0           ! m
-    dens_max   = 10             ! Number of points
-    
-    ! Method 
+    U_max_dep =  40.0           ! m/a
+    H_min_dep = 100.0           ! m
+    alpha     = 1.0             ! Only used by weight = linear, quadratic
+    weight    = "vel"           ! vel, linear, quadratic, rand
+    noise     = True
+
+    ! Method
     interp_method = "linear"    ! "linear" or "spline"
 
     par_trans_file = "tracer_par_transient.txt"
