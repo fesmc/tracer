@@ -31,6 +31,7 @@ module tracer3D
         real(prec) :: alpha                     ! Slope of probability function ("linear"/"quadratic" weights)
         character(len=56) :: weight             ! Deposition prob. distribution: vel, linear, quadratic, rand
         logical    :: noise                     ! Add noise to gridded deposition location
+        integer    :: seed                      ! RNG seed; <= 0 => nondeterministic
         character(len=56) :: interp_method
 
         ! Transient parameters 
@@ -190,10 +191,10 @@ contains
         trc%now%time_dep   = time - 1000.0 
         trc%now%time_write = time - 1000.0 
 
-        ! Initialize random number generator 
-        call random_seed() 
+        ! Initialize random number generator
+        call tracer_set_seed(trc%par%seed)
 
-        return 
+        return
 
     end subroutine tracer_init
 
@@ -1003,6 +1004,41 @@ contains
     !
     ! ================================================
 
+    subroutine tracer_set_seed(seed)
+        ! Seed the intrinsic random number generator, which drives the
+        ! deposition location jitter (par%noise) and the "rand" weight. A
+        ! positive seed makes a run reproducible; seed <= 0 defers to the
+        ! processor's nondeterministic seeding.
+
+        implicit none
+
+        integer, intent(IN) :: seed
+
+        ! Local variables
+        integer :: n, i
+        integer, allocatable :: sd(:)
+
+        if (seed .le. 0) then
+            call random_seed()
+            return
+        end if
+
+        call random_seed(size=n)
+        allocate(sd(n))
+
+        ! Spread one user-facing seed across the generator's whole state. An
+        ! all-equal state is a poor starting point for the xorshift generator
+        ! gfortran uses.
+        do i = 1, n
+            sd(i) = seed + 37*(i-1)
+        end do
+
+        call random_seed(put=sd)
+
+        return
+
+    end subroutine tracer_set_seed
+
     subroutine tracer_par_load(par,filename,is_sigma)
 
         implicit none 
@@ -1024,6 +1060,7 @@ contains
         call nml_read(filename,"tracer_par","alpha",         par%alpha)
         call nml_read(filename,"tracer_par","weight",        par%weight)
         call nml_read(filename,"tracer_par","noise",         par%noise)
+        call nml_read(filename,"tracer_par","seed",          par%seed)
         call nml_read(filename,"tracer_par","interp_method", par%interp_method)
         call nml_read(filename,"tracer_par","par_trans_file",par%par_trans_file)
     

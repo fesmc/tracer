@@ -40,6 +40,10 @@ Add `debug=1` to any build for bounds checking and floating-point traps.
 
 ## Benchmarks
 
+All three are bit-reproducible: deposition draws on the random number generator
+(for the location jitter and the `rand` weight), which is seeded from the `seed`
+namelist parameter. Set `seed <= 0` for a nondeterministic run.
+
 ```bash
 make check                    # runs all three cases below; nonzero exit on any failure
 
@@ -98,6 +102,7 @@ Set in the `&tracer_par` namelist group:
 | `weight` | deposition distribution: `vel`, `linear`, `quadratic`, `rand` |
 | `alpha` | slope of the probability function (`linear`, `quadratic` only) |
 | `noise` | jitter the deposition location within its grid cell |
+| `seed` | RNG seed; positive is reproducible, `<= 0` defers to the OS |
 | `interp_method` | `linear` or `spline` |
 | `par_trans_file` | transient parameter table, or `"None"` |
 

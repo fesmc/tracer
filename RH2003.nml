@@ -14,6 +14,7 @@
     alpha     = 1.0             ! Only used by weight = linear, quadratic
     weight    = "vel"           ! vel, linear, quadratic, rand
     noise     = True
+    seed      = 42              ! RNG seed; <= 0 for a nondeterministic run
 
     ! Method
     interp_method = "linear"    ! "linear" or "spline"
