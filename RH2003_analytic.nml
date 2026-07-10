@@ -1,5 +1,5 @@
-&tracer_par
-    dt        =   10.0 
+&trc
+    dt        =   10.0
     n         = 1
     n_max_dep = 1
     dt_dep    =  500.0 
@@ -20,7 +20,9 @@
     interp_method = "linear"    ! "linear" or "spline"
 
     par_trans_file = "None"
-    
+
+    stats = False               ! No gridded statistics for the idealized profile
+
 /
 
 &rh_par

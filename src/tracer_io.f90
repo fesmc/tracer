@@ -12,10 +12,8 @@ module tracer_io
     private 
     public :: tracer_write_init, tracer2D_write_init
     public :: tracer_write, tracer2D_write
-    public :: tracer_write_slice
-    public :: tracer_write_stats, tracer2D_write_stats
-    public :: tracer_read 
-    public :: tracer_align 
+    public :: tracer_read
+    public :: tracer_align
     public :: tracer_import_eulerian
 
 contains 
@@ -141,254 +139,24 @@ contains
         call nc_write(path_out,"dep_z",real(trc%dep%z,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="m")
 
-        return 
-
-    end subroutine tracer_write 
-
-    subroutine tracer_write_slice(trc,time,fldr,filename,is2D)
-        ! Write a self-contained snapshot of the currently active tracers.
-        !
-        ! Unlike tracer_write, which appends every tracer slot (active or not)
-        ! along a growing time dimension, this writes one file per call holding
-        ! only the active particles and no time dimension on the point
-        ! variables. That keeps a slice small when few of the n slots are in use.
-
-        implicit none
-
-        type(tracer_class), intent(INOUT) :: trc
-        real(prec_time),  intent(IN) :: time
-        character(len=*), intent(IN) :: fldr, filename
-        logical, intent(IN), optional :: is2D
-
-        ! Local variables
-        real(prec_wrt) :: mv_wrt
-        real(prec_wrt), allocatable :: tmp(:)
-        integer, allocatable :: inds(:)
-        character(len=512) :: path_out
-        logical :: is_2D
-        integer :: n_act
-
-        trc%now%time_write = time
-
-        path_out = trim(fldr)//"/"//trim(filename)
-
-        mv_wrt = MV
-
-        ! Determine whether just writing a profile
-        is_2D = .FALSE.
-        if (present(is2D)) is_2D = is2D
-
-        if (trc%par%n_active .eq. 0) then
-            ! Nothing is active, so there is nothing to slice. Return without
-            ! creating a file: an empty slice is indistinguishable from a lost
-            ! one, and `which` below would yield the -1 sentinel.
-            return
-        end if
-
-        ! Get indices of active particles. n_active counts active > 0, so the
-        ! same condition must be used here for inds to have n_active entries.
-        call which(trc%now%active .gt. 0, inds)
-        n_act = size(inds)
-
-        ! Create output file
-        call nc_create(path_out)
-        call nc_write_dim(path_out,"pt",x=1,dx=1,nx=n_act)
-        call nc_write_dim(path_out,"time",x=real(time,prec_wrt),unlimited=.TRUE.)
-
-        allocate(tmp(n_act))
-
-        ! === Current state ===
-
-        call write_slice_var(path_out,"x",real(trc%now%x(inds)*1e-3,prec_wrt),mv_wrt,"km")
+        ! Deposition tags. Any field a run does not supply is stored as missing,
+        ! so the archive carries a stable schema regardless of the forcing.
         if (.not. is_2D) then
-            call write_slice_var(path_out,"y",real(trc%now%y(inds)*1e-3,prec_wrt),mv_wrt,"km")
+            call nc_write(path_out,"dep_lon",real(trc%dep%lon,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                            start=[1,nt],count=[trc%par%n ,1],units="degrees_east")
+            call nc_write(path_out,"dep_lat",real(trc%dep%lat,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                            start=[1,nt],count=[trc%par%n ,1],units="degrees_north")
         end if
-        call write_slice_var(path_out,"z",    real(trc%now%z(inds),prec_wrt),    mv_wrt,"m")
-        call write_slice_var(path_out,"dpth", real(trc%now%dpth(inds),prec_wrt), mv_wrt,"m")
-        call write_slice_var(path_out,"z_srf",real(trc%now%z_srf(inds),prec_wrt),mv_wrt,"m")
-        call write_slice_var(path_out,"ux",   real(trc%now%ux(inds),prec_wrt),   mv_wrt,"m/a")
-        call write_slice_var(path_out,"uy",   real(trc%now%uy(inds),prec_wrt),   mv_wrt,"m/a")
-        call write_slice_var(path_out,"uz",   real(trc%now%uz(inds),prec_wrt),   mv_wrt,"m/a")
-        call write_slice_var(path_out,"thk",  real(trc%now%thk(inds),prec_wrt),  mv_wrt,"m")
-        call write_slice_var(path_out,"T",    real(trc%now%T(inds),prec_wrt),    mv_wrt,"K")
-        call write_slice_var(path_out,"H",    real(trc%now%H(inds),prec_wrt),    mv_wrt,"m")
-
-        call nc_write(path_out,"id",trc%now%id(inds),dim1="pt",missing_value=int(MV))
-
-        ! Age is only defined where a deposition time was recorded.
-        tmp = mv_wrt
-        where(trc%dep%time(inds) .ne. mv_wrt) tmp = real(time-trc%dep%time(inds),prec_wrt)
-        call nc_write(path_out,"age",tmp,dim1="pt",missing_value=mv_wrt,units="a")
-
-        ! === Deposition information ===
-
-        call write_slice_var(path_out,"dep_time",real(trc%dep%time(inds),prec_wrt),mv_wrt,"a")
-        call write_slice_var(path_out,"dep_H",   real(trc%dep%H(inds),prec_wrt),   mv_wrt,"m")
-
-        tmp = real(trc%dep%x(inds),prec_wrt)
-        where(tmp .ne. mv_wrt) tmp = tmp*1e-3
-        call nc_write(path_out,"dep_x",tmp,dim1="pt",missing_value=mv_wrt,units="km")
-
-        if (.not. is_2D) then
-            tmp = real(trc%dep%y(inds),prec_wrt)
-            where(tmp .ne. mv_wrt) tmp = tmp*1e-3
-            call nc_write(path_out,"dep_y",tmp,dim1="pt",missing_value=mv_wrt,units="km")
-        end if
-
-        call write_slice_var(path_out,"dep_z",real(trc%dep%z(inds),prec_wrt),mv_wrt,"m")
-
-        ! === Deposition tagging fields ===
-        ! Each is MV where the caller did not supply the corresponding field to
-        ! tracer_update.
-
-        call write_slice_var(path_out,"dep_lon",     real(trc%dep%lon(inds),prec_wrt),     mv_wrt,"degrees_east")
-        call write_slice_var(path_out,"dep_lat",     real(trc%dep%lat(inds),prec_wrt),     mv_wrt,"degrees_north")
-        call write_slice_var(path_out,"dep_t2m_ann", real(trc%dep%t2m_ann(inds),prec_wrt), mv_wrt,"K")
-        call write_slice_var(path_out,"dep_t2m_sum", real(trc%dep%t2m_sum(inds),prec_wrt), mv_wrt,"K")
-        call write_slice_var(path_out,"dep_pr_ann",  real(trc%dep%pr_ann(inds),prec_wrt),  mv_wrt,"m/a")
-        call write_slice_var(path_out,"dep_pr_sum",  real(trc%dep%pr_sum(inds),prec_wrt),  mv_wrt,"m/a")
-        call write_slice_var(path_out,"dep_d18O_ann",real(trc%dep%d18O_ann(inds),prec_wrt),mv_wrt,"permil")
+        call nc_write(path_out,"dep_t2m_ann",real(trc%dep%t2m_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="K")
+        call nc_write(path_out,"dep_pr_ann",real(trc%dep%pr_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="m/a")
+        call nc_write(path_out,"dep_d18O_ann",real(trc%dep%d18O_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="permil")
 
         return
 
-    end subroutine tracer_write_slice
-
-    subroutine write_slice_var(path_out,name,dat,mv_wrt,units)
-        ! Write one point variable of a tracer slice (dimension "pt" only).
-
-        implicit none
-
-        character(len=*), intent(IN) :: path_out, name, units
-        real(prec_wrt),   intent(IN) :: dat(:)
-        real(prec_wrt),   intent(IN) :: mv_wrt
-
-        call nc_write(path_out,name,dat,dim1="pt",missing_value=mv_wrt,units=units)
-
-        return
-
-    end subroutine write_slice_var
-
-    subroutine tracer_write_diagnostic_init(trc,time,fldr,filename)
-
-        implicit none 
-
-        type(tracer_class), intent(IN) :: trc 
-        real(prec_time) :: time
-        character(len=*), intent(IN)   :: fldr, filename 
-
-        ! Local variables 
-        integer :: nt 
-        character(len=512) :: path_out 
-
-        path_out = trim(fldr)//"/"//trim(filename)
-
-        ! Create output file 
-        call nc_create(path_out)
-        call nc_write_dim(path_out,"xc",        x=trc%stats%x*1e-3,     units="km")
-        call nc_write_dim(path_out,"yc",        x=trc%stats%y*1e-3,     units="km")
-        call nc_write_dim(path_out,"depth_norm",x=trc%stats%depth_norm, units="1")
-        call nc_write_dim(path_out,"age_iso",   x=trc%stats%age_iso,    units="ka")
-        call nc_write_dim(path_out,"time",      x=time,unlimited=.TRUE.,units="ka")
-        
-        return 
-
-    end subroutine tracer_write_diagnostic_init 
-
-    subroutine tracer_write_diagnostic_stats(trc,time,fldr,filename) !,z_srf,H)
-        ! Write various meta-tracer information (ie, lagrangian => eulerian)
-        implicit none 
-
-        type(tracer_class), intent(IN) :: trc 
-        real(prec_time) :: time
-        character(len=*),   intent(IN) :: fldr, filename 
-!         real(prec),         intent(IN) :: z_srf(:,:), H(:,:) 
-
-        ! Local variables 
-        character(len=512) :: path_out 
-        real(prec_wrt) :: mv_wrt 
-
-        path_out = trim(fldr)//"/"//trim(filename)
-
-        mv_wrt = MV 
-
-!         call nc_write(path_out,"z_srf",z_srf,dim1="xc",dim2="yc",missing_value=mv_wrt, &
-!                       units="m",long_name="Surface elevation")
-!         call nc_write(path_out,"H",H,dim1="xc",dim2="yc",missing_value=mv_wrt, &
-!                       units="m",long_name="Ice thickness")
-
-        call nc_write(path_out,"ice_age",trc%stats%ice_age,dim1="xc",dim2="yc",dim3="depth_norm",missing_value=mv_wrt, &
-                      units="ka",long_name="Layer age")
-        call nc_write(path_out,"ice_age_err",trc%stats%ice_age_err,dim1="xc",dim2="yc",dim3="depth_norm",missing_value=mv_wrt, &
-                      units="ka",long_name="Layer age - error")
-        call nc_write(path_out,"density",trc%stats%density,dim1="xc",dim2="yc",dim3="depth_norm",missing_value=int(mv_wrt), &
-                      units="1",long_name="Tracer density")
-
-        call nc_write(path_out,"depth_iso",trc%stats%depth_iso,dim1="xc",dim2="yc",dim3="age_iso",missing_value=mv_wrt, &
-                      units="m",long_name="Isochrone depth")
-        call nc_write(path_out,"depth_iso_err",trc%stats%depth_iso_err,dim1="xc",dim2="yc",dim3="age_iso",missing_value=mv_wrt, &
-                      units="m",long_name="Isochrone depth - error")
-        call nc_write(path_out,"dep_z_iso",trc%stats%dep_z_iso,dim1="xc",dim2="yc",dim3="age_iso",missing_value=mv_wrt, &
-                      units="m",long_name="Isochrone deposition elevation")
-        call nc_write(path_out,"density_iso",trc%stats%density_iso,dim1="xc",dim2="yc",dim3="age_iso",missing_value=int(mv_wrt), &
-                      units="1",long_name="Tracer density (for isochrones)")
-
-        
-        return 
-
-    end subroutine tracer_write_diagnostic_stats
-    
-    subroutine tracer_write_stats(trc,time,fldr,filename) !,z_srf,H)
-        ! Write various meta-tracer information (ie, lagrangian => eulerian)
-        ! This output belongs to a specific time slice, usually at time = 0 ka BP. 
-
-        implicit none 
-
-        type(tracer_class), intent(IN) :: trc 
-        real(prec_time) :: time
-        character(len=*),   intent(IN) :: fldr, filename 
-!         real(prec),         intent(IN) :: z_srf(:,:), H(:,:) 
-
-        ! Local variables 
-        character(len=512) :: path_out 
-        real(prec_wrt) :: mv_wrt 
-
-        path_out = trim(fldr)//"/"//trim(filename)
-
-        mv_wrt = MV 
-
-        ! Create output file 
-        call nc_create(path_out)
-        call nc_write_dim(path_out,"xc",        x=trc%stats%x*1e-3,     units="km")
-        call nc_write_dim(path_out,"yc",        x=trc%stats%y*1e-3,     units="km")
-        call nc_write_dim(path_out,"depth_norm",x=trc%stats%depth_norm, units="1")
-        call nc_write_dim(path_out,"age_iso",   x=trc%stats%age_iso,    units="ka")
-        call nc_write_dim(path_out,"time",      x=time,unlimited=.TRUE.,units="ka")
-        
-!         call nc_write(path_out,"z_srf",z_srf,dim1="xc",dim2="yc",missing_value=mv_wrt, &
-!                       units="m",long_name="Surface elevation")
-!         call nc_write(path_out,"H",H,dim1="xc",dim2="yc",missing_value=mv_wrt, &
-!                       units="m",long_name="Ice thickness")
-
-        call nc_write(path_out,"ice_age",trc%stats%ice_age,dim1="xc",dim2="yc",dim3="depth_norm",missing_value=mv_wrt, &
-                      units="ka",long_name="Layer age")
-        call nc_write(path_out,"ice_age_err",trc%stats%ice_age_err,dim1="xc",dim2="yc",dim3="depth_norm",missing_value=mv_wrt, &
-                      units="ka",long_name="Layer age - error")
-        call nc_write(path_out,"density",trc%stats%density,dim1="xc",dim2="yc",dim3="depth_norm",missing_value=int(mv_wrt), &
-                      units="1",long_name="Tracer density")
-
-        call nc_write(path_out,"depth_iso",trc%stats%depth_iso,dim1="xc",dim2="yc",dim3="age_iso",missing_value=mv_wrt, &
-                      units="m",long_name="Isochrone depth")
-        call nc_write(path_out,"depth_iso_err",trc%stats%depth_iso_err,dim1="xc",dim2="yc",dim3="age_iso",missing_value=mv_wrt, &
-                      units="m",long_name="Isochrone depth - error")
-        call nc_write(path_out,"dep_z_iso",trc%stats%dep_z_iso,dim1="xc",dim2="yc",dim3="age_iso",missing_value=mv_wrt, &
-                      units="m",long_name="Isochrone deposition elevation")
-        call nc_write(path_out,"density_iso",trc%stats%density_iso,dim1="xc",dim2="yc",dim3="age_iso",missing_value=int(mv_wrt), &
-                      units="1",long_name="Tracer density (for isochrones)")
-
-        
-        return 
-
-    end subroutine tracer_write_stats
+    end subroutine tracer_write
     
     subroutine tracer_read(trc,filename,time)
 
@@ -567,52 +335,5 @@ contains
         return 
 
     end subroutine tracer2D_write 
-
-    subroutine tracer2D_write_stats(trc,time,fldr,filename) !,z_srf,H)
-
-        implicit none 
-
-        type(tracer_class), intent(IN) :: trc 
-        real(prec_time) :: time
-        character(len=*), intent(IN)   :: fldr, filename 
-!         real(prec),         intent(IN) :: z_srf(:), H(:) 
-
-        ! Local variables 
-        integer :: nt 
-        character(len=512) :: path_out 
-        real(prec_wrt) :: mv_wrt 
-
-        path_out = trim(fldr)//"/"//trim(filename)
-
-        mv_wrt = MV 
-
-        ! Create output file 
-        call nc_create(path_out)
-        call nc_write_dim(path_out,"xc",        x=trc%stats%x*1e-3,     units="km")
-        call nc_write_dim(path_out,"depth_norm",x=trc%stats%depth_norm, units="1")
-        call nc_write_dim(path_out,"age_iso",   x=trc%stats%age_iso,    units="ka")
-        call nc_write_dim(path_out,"time",      x=time,unlimited=.TRUE.,units="ka")
-        
-!         call nc_write(path_out,"z_srf",z_srf,dim1="xc",missing_value=mv_wrt, &
-!                       units="m",long_name="Surface elevation")
-!         call nc_write(path_out,"H",H,dim1="xc",missing_value=mv_wrt, &
-!                       units="m",long_name="Ice thickness")
-
-        call nc_write(path_out,"ice_age",trc%stats%ice_age(:,1,:),dim1="xc",dim2="depth_norm",missing_value=mv_wrt, &
-                      units="ka",long_name="Layer age")
-        call nc_write(path_out,"ice_age_err",trc%stats%ice_age_err(:,1,:),dim1="xc",dim2="depth_norm",missing_value=mv_wrt, &
-                      units="ka",long_name="Layer age - error")
-
-        call nc_write(path_out,"depth_iso",trc%stats%depth_iso(:,1,:),dim1="xc",dim2="age_iso",missing_value=mv_wrt, &
-                      units="ka",long_name="Isochrone depth")
-        call nc_write(path_out,"depth_iso_err",trc%stats%depth_iso_err(:,1,:),dim1="xc",dim2="age_iso",missing_value=mv_wrt, &
-                      units="ka",long_name="Isochrone depth - error")
-        
-        call nc_write(path_out,"density",trc%stats%density(:,1,:),dim1="xc",dim2="depth_norm",missing_value=int(mv_wrt), &
-                      units="1",long_name="Tracer density")
-        
-        return 
-
-    end subroutine tracer2D_write_stats
 
 end module tracer_io

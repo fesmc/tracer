@@ -1,4 +1,4 @@
-&tracer_par
+&trc
     dt        = 10.0
     n         = 3000
     n_max_dep = 50
@@ -20,7 +20,9 @@
     interp_method = "linear"    ! "linear" or "spline"
 
     par_trans_file = "tracer_par_transient.txt"
-    
+
+    stats = False               ! No gridded statistics for the idealized profile
+
 /
 
 &rh_par

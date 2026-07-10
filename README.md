@@ -90,6 +90,20 @@ The forcing is read at an explicit index along the restart's time dimension, so
 the same driver serves an offline transient run forced by a sequence of
 ice-sheet states. Inside a coupled model the fields are passed directly instead.
 
+It writes three streams:
+
+All three land in the run directory (`output/GRL-16KM/`), which carries the
+domain; the file names themselves are bare.
+
+| file | contents |
+|---|---|
+| `tracer.nc` | every tracer slot over time — position, velocity, `id`, `age`, deposition tags |
+| `tracer-stats.nc` | gridded monitor, appended over time: per `(x, y, depth_norm)` the surviving tracer `count` and the mean/sd of each deposition tag. A quick ncview check that a run behaves. |
+| `tracer-pd.nc` | present-day product (t = 0): adds the isochrone block (`depth_iso` at each `age_iso`) and full grid metadata, a drop-in comparison for a radiostratigraphy dataset such as `GRL-16KM_STRAT-M15.nc`. |
+
+The gridded statistics are opt-in (`stats = .TRUE.`) and driver-supplied a
+projected grid for the metadata; see `&trc` below and `src/tracer_stats.f90`.
+
 ## Using the library
 
 ```fortran
@@ -97,7 +111,7 @@ use tracer
 
 type(tracer_class) :: trc
 
-call tracer_init(trc,"Greenland.nml",time=time,x=xc,y=yc,is_sigma=.TRUE.)
+call tracer_init(trc,"Greenland.nml",time=time,x=xc,y=yc,is_sigma=.TRUE.,grid=grd)
 
 call tracer_update(trc,time=time,x=xc,y=yc,z=zeta,z_srf=z_srf,H=H_ice, &
                    ux=ux,uy=uy,uz=uz,dep_now=dep_now,stats_now=stats_now)
@@ -114,7 +128,7 @@ missing, so advecting particles requires no climate forcing.
 
 ## Parameters
 
-Set in the `&tracer_par` namelist group:
+Set in the `&trc` namelist group:
 
 | parameter | meaning |
 |---|---|
@@ -128,6 +142,17 @@ Set in the `&tracer_par` namelist group:
 | `seed` | RNG seed; positive is reproducible, `<= 0` defers to the OS |
 | `interp_method` | `linear` or `spline` |
 | `par_trans_file` | transient parameter table, or `"None"` |
+| `stats` | compute gridded (Eulerian) statistics? |
+
+The gridded-statistics parameters are read only when `stats = .TRUE.`, so a run
+that does not want them omits them entirely:
+
+| parameter | meaning |
+|---|---|
+| `dt_write_stats` | cadence of the transient monitor file [a] |
+| `n_depth` | number of normalized-depth levels (uniform over 0–1) |
+| `age_iso`, `n_age_iso` | isochrone target ages [ka] and their count |
+| `dt_iso` | isochrone half-width [ka] |
 
 `weight` ranks cells rather than being sampled from: each deposition step takes
 the `n_max_dep` highest-ranked cells outright, so `vel` deposits into the

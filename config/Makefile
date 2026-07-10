@@ -66,7 +66,11 @@ $(objdir)/tracer_precision.o: $(srcdir)/tracer_precision.f90
 $(objdir)/tracer_interp.o: $(srcdir)/tracer_interp.f90 $(objdir)/tracer_precision.o $(objdir)/bspline_module.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/tracer3D.o: $(srcdir)/tracer3D.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_interp.o $(objdir)/bspline_module.o
+$(objdir)/tracer_stats.o: $(srcdir)/tracer_stats.f90 $(objdir)/tracer_precision.o
+	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
+
+$(objdir)/tracer3D.o: $(srcdir)/tracer3D.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_interp.o \
+					$(objdir)/tracer_stats.o $(objdir)/bspline_module.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
 $(objdir)/tracer2D.o: $(srcdir)/tracer2D.f90 $(objdir)/tracer3D.o $(objdir)/tracer_precision.o
@@ -76,11 +80,12 @@ $(objdir)/tracer_io.o: $(srcdir)/tracer_io.f90 $(objdir)/tracer3D.o $(objdir)/tr
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
 $(objdir)/tracer.o: $(srcdir)/tracer.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_interp.o \
-					$(objdir)/tracer3D.o $(objdir)/tracer2D.o $(objdir)/tracer_io.o
+					$(objdir)/tracer_stats.o $(objdir)/tracer3D.o $(objdir)/tracer2D.o $(objdir)/tracer_io.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
 obj_tracer =	$(objdir)/tracer_precision.o \
 				$(objdir)/tracer_interp.o \
+				$(objdir)/tracer_stats.o \
 				$(objdir)/tracer3D.o \
 				$(objdir)/tracer2D.o \
 				$(objdir)/tracer_io.o \

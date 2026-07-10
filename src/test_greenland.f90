@@ -11,15 +11,17 @@ program tracertest
 
     use nml
     use ncio
+    use coords, only : grid_class, grid_init
     use tracer
 
     implicit none
 
     type(tracer_class) :: trc1
+    type(grid_class)   :: grd
 
     character(len=512) :: filename_nml
     character(len=512) :: file_topo, file_restart
-    character(len=512) :: fldr, filename, filename_stats, filename_slice
+    character(len=512) :: fldr, filename, filename_stats, filename_pd
 
     integer :: nx, ny, nz, nz_ac
     integer :: time_index
@@ -85,6 +87,10 @@ program tracertest
     call nc_read(file_topo,"lon2D",lon2D)
     call nc_read(file_topo,"lat2D",lat2D)
 
+    ! The projected grid (with lon/lat/area/crs) for the gridded-stats output.
+    ! In a Yelmo coupling this object is owned by Yelmo and passed straight in.
+    call grid_init(grd,filename=file_topo)
+
     ! Geometry and velocity at one record of the restart's time axis.
     call nc_read(file_restart,"z_srf",z_srf, start=[1,1,time_index],  count=[nx,ny,1])
     call nc_read(file_restart,"H_ice",H_ice, start=[1,1,time_index],  count=[nx,ny,1])
@@ -100,14 +106,15 @@ program tracertest
 
     ! === Run ===================================================
 
-    fldr           = "output/GRL-16KM"
-    filename       = "GRL-16KM_trc1.nc"
-    filename_stats = "GRL-16KM_trc1-stats.nc"
-    filename_slice = "GRL-16KM_trc1-slice.nc"
+    fldr            = "output/GRL-16KM"
+    filename        = "tracer.nc"
+    filename_stats  = "tracer-stats.nc"
+    filename_pd     = "tracer-pd.nc"
 
     call tracer_init(trc1,filename_nml,time=real(time_start,prec_time), &
-                     x=xc,y=yc,is_sigma=.TRUE.)
+                     x=xc,y=yc,is_sigma=.TRUE.,grid=grd)
     call tracer_write_init(trc1,fldr,filename)
+    call tracer_write_stats_init(trc1%stats,fldr,filename_stats)
 
     nstep = int((time_end-time_start)/trc1%par%dt)
 
@@ -115,9 +122,9 @@ program tracertest
 
         time = time_start + trc1%par%dt*k
 
-        dep_now   = (mod(time,trc1%par%dt_dep)   .eq. 0.0)
-        write_now = (mod(time,trc1%par%dt_write) .eq. 0.0)
-        stats_now = (k .eq. nstep)
+        dep_now   = (mod(time,trc1%par%dt_dep)         .eq. 0.0)
+        write_now = (mod(time,trc1%par%dt_write)       .eq. 0.0)
+        stats_now = (mod(time,trc1%par%dt_write_stats) .eq. 0.0)
 
         ! Climate tagging fields (t2m, pr, d18O) are not carried by the restart,
         ! so they are omitted and recorded as missing. lon/lat are supplied.
@@ -131,12 +138,14 @@ program tracertest
             call tracer_write(trc1,real(time,prec_time),fldr,filename)
         end if
 
+        ! Append a gridded-statistics snapshot (the transient monitor).
+        if (stats_now) call tracer_write_stats(trc1%stats,real(time,prec_time),fldr,filename_stats)
+
     end do
 
-    call tracer_write_stats(trc1,real(time_end,prec_time),fldr,filename_stats)
-
-    ! A compact snapshot of just the active tracers at the final time.
-    call tracer_write_slice(trc1,real(time_end,prec_time),fldr,filename_slice)
+    ! Present-day product: isochrones, depth-layer stats and grid metadata.
+    ! calc_tracer_stats ran on the final step (stats_now true at time_end = 0).
+    call tracer_write_product(trc1%stats,fldr,filename_pd,H_ice=H_ice)
 
     if (trc1%par%n_active .eq. 0) then
         write(0,*) "test_greenland:: error: no tracers were deposited."

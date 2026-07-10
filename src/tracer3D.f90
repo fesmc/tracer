@@ -2,11 +2,13 @@
 module tracer3D 
 
     use tracer_precision
-    use tracer_interp 
-    use bspline_module, only : bspline_3d    
-    use nml 
+    use tracer_interp
+    use tracer_stats
+    use bspline_module, only : bspline_3d
+    use nml
+    use coords, only : grid_class
 
-    implicit none 
+    implicit none
 
     type tracer_par_trans_class
         integer :: nt 
@@ -35,12 +37,20 @@ module tracer3D
         integer    :: seed                      ! RNG seed; <= 0 => nondeterministic
         character(len=56) :: interp_method
 
-        ! Transient parameters 
-        character(len=512) :: par_trans_file 
+        ! Transient parameters
+        character(len=512) :: par_trans_file
         logical            :: use_par_trans
-        type(tracer_par_trans_class) :: tpar 
+        type(tracer_par_trans_class) :: tpar
 
-    end type 
+        ! Gridded statistics (Eulerian output). Read only when stats = .TRUE.;
+        ! see tracer_stats. depth_norm is built as n_depth uniform levels.
+        logical            :: stats
+        real(prec_time)    :: dt_write_stats
+        integer            :: n_depth
+        real(prec_wrt), allocatable :: age_iso(:)
+        real(prec_wrt)     :: dt_iso
+
+    end type
 
     type tracer_state_class
         real(prec_time) :: time, time_old
@@ -57,26 +67,7 @@ module tracer3D
 
     end type 
 
-    type tracer_stats_class
-        ! All stats variable at precision of writing (prec_wrt), since
-        ! this should not need high precision output 
-
-        real(prec_wrt), allocatable :: x(:), y(:)
-        real(prec_wrt), allocatable :: depth_norm(:)
-        real(prec_wrt), allocatable :: age_iso(:) 
-
-        real(prec_wrt), allocatable :: depth_iso(:,:,:)
-        real(prec_wrt), allocatable :: depth_iso_err(:,:,:)
-        real(prec_wrt), allocatable :: dep_z_iso(:,:,:)
-        integer,    allocatable :: density_iso(:,:,:)
-        
-        real(prec_wrt), allocatable :: ice_age(:,:,:)
-        real(prec_wrt), allocatable :: ice_age_err(:,:,:)
-        integer,    allocatable :: density(:,:,:)
-           
-    end type
-
-    type tracer_dep_class 
+    type tracer_dep_class
         ! Standard deposition information (time and place)
         real(prec), allocatable :: time(:) 
         real(prec), allocatable :: H(:) 
@@ -124,42 +115,41 @@ module tracer3D
 
 contains 
 
-    subroutine tracer_init(trc,filename,time,x,y,is_sigma)
+    subroutine tracer_init(trc,filename,time,x,y,is_sigma,grid)
 
-        implicit none 
+        implicit none
 
-        type(tracer_class),   intent(OUT) :: trc 
-        character(len=*),     intent(IN)  :: filename 
+        type(tracer_class),   intent(OUT) :: trc
+        character(len=*),     intent(IN)  :: filename
         real(prec), intent(IN) :: x(:), y(:)
-        logical,    intent(IN) :: is_sigma  
-        real(prec_time), intent(IN) :: time 
-
-        ! Local variables 
-        integer :: i 
+        logical,    intent(IN) :: is_sigma
+        real(prec_time), intent(IN) :: time
+        ! Grid metadata for the gridded-stats output; only meaningful when the
+        ! namelist sets stats = .TRUE., and even then optional (x/y is the
+        ! fallback). Supplied by the host model (e.g. Yelmo owns the grid).
+        type(grid_class), intent(IN), optional :: grid
 
         ! Load the parameters
         call tracer_par_load(trc%par,filename,is_sigma)
 
         ! Update the transient parameters
-        if (trc%par%use_par_trans) then 
+        if (trc%par%use_par_trans) then
             call tracer_par_update(trc%par,trc%par%tpar,time)
-        end if 
+        end if
 
-        ! Allocate the state variables 
+        ! Allocate the state variables
         call tracer_allocate(trc%now,trc%dep,n=trc%par%n)
-        call tracer_allocate_stats(trc%stats,x,y)
 
-        ! ===== Initialize stats depth axes ===============
+        ! Gridded statistics are opt-in (namelist stats flag). depth_norm is
+        ! n_depth uniform levels; age_iso, dt_iso, dt_write_stats come from par.
+        if (trc%par%stats) then
+            call tracer_stats_init(trc%stats,x,y, &
+                                   depth_norm=uniform_depth(trc%par%n_depth), &
+                                   age_iso=trc%par%age_iso, dt_iso=trc%par%dt_iso, &
+                                   grid=grid)
+        end if
 
-        trc%stats%age_iso = [11.7,29.0,57.0,115.0,130.0]
-
-        do i = 1, size(trc%stats%depth_norm)
-            trc%stats%depth_norm(i) = 0.04*real(i)
-        end do 
-
-        ! =================================================
-
-        ! Initialize state 
+        ! Initialize state
         trc%now%active    = 0 
 
         trc%now%id        = mv 
@@ -486,13 +476,20 @@ contains
         !   to be stored from the main program. 
         !   Downside to above approach, is re-calculating the par_lin object every time. 
 
-        ! Update summary statistics 
+        ! Update summary statistics
         trc%par%n_active = count(trc%now%active.gt.0)
 
-        ! Calculate some summary information on eulerian grid if desired 
-        if (stats_now) call calc_tracer_stats(trc,x,y,z,z_srf,H)
+        ! Gridded (Eulerian) statistics on request. The stats object is only
+        ! allocated when par%stats; calc_tracer_stats (tracer_stats) takes the
+        ! tracer state as plain arrays, so this module does not depend on it.
+        if (trc%par%stats .and. stats_now) then
+            call calc_tracer_stats(trc%stats, time, trc%now%active, &
+                                   trc%now%x, trc%now%y, trc%now%dpth, trc%now%H, &
+                                   trc%dep%time, trc%dep%z, trc%dep%lon, trc%dep%lat, &
+                                   trc%dep%t2m_ann, trc%dep%pr_ann, trc%dep%d18O_ann)
+        end if
 
-        return 
+        return
 
     end subroutine tracer_update
 
@@ -500,10 +497,11 @@ contains
 
         implicit none 
 
-        type(tracer_class),   intent(OUT) :: trc 
-        
-        ! Allocate the state variables 
+        type(tracer_class),   intent(OUT) :: trc
+
+        ! Allocate the state variables
         call tracer_deallocate(trc%now,trc%dep)
+        call tracer_stats_end(trc%stats)
 
         write(*,*) "tracer:: tracer object deallocated."
         
@@ -858,156 +856,6 @@ contains
 
     end function calc_angle 
 
-    subroutine calc_tracer_stats(trc,x,y,z,z_srf,H)
-        ! Convert tracer information to isochrone format matching
-        ! Macgregor et al. (2015)
-        ! Note: this should only be called at time t=0 ka BP, 
-        ! since age is defined assuming that. 
-
-        implicit none
-        
-        type(tracer_class), intent(INOUT) :: trc
-        real(prec), intent(IN) :: x(:), y(:), z(:), z_srf(:,:), H(:,:)
-
-        ! Local variables 
-        integer :: i, j, k, q
-        integer :: nx, ny, nz, nq
-        real(prec), allocatable :: dx(:), dy(:) 
-        real(prec) :: dt, dz, dz_now  
-        real(prec) :: zc(size(z))
-        integer       :: id(trc%par%n)
-        real(prec)    :: dist(trc%par%n)
-        integer, allocatable :: inds(:)
-        integer :: n_ind 
-
-        nx = size(x)
-        ny = size(y)
-        
-        allocate(dx(nx+1),dy(ny+1))
-        dx(2:nx) = (x(2:nx)-x(1:nx-1))/2.0
-        dx(1)    = dx(2)
-        dx(nx+1) = dx(nx)
-        dy(2:ny) = (y(2:ny)-y(1:ny-1))/2.0
-        dy(1)    = dy(2)
-        dy(ny+1) = dy(ny)
-        
-        dt = 5.0 ! Isochrone uncertainty of ±5 ka  
-        dz = (trc%stats%depth_norm(2) - trc%stats%depth_norm(1))/2.0   ! depth_norm is equally spaced
-
-        ! Loop over grid and fill in information
-        do j = 1, ny 
-        do i = 1, nx 
-
-            ! Calculate the isochrones
-            nq = size(trc%stats%age_iso)
-            do q = 1, nq 
-
-                ! Filter for active particles within the grid box and age of interest
-                call which (trc%now%active == 2 .and. &
-                            trc%now%x .gt. x(i)-dx(i) .and. trc%now%x .le. x(i)+dx(i+1) .and. &
-                            trc%now%y .gt. y(j)-dy(j) .and. trc%now%y .le. y(j)+dy(j+1) .and. &
-                            (0.0 - trc%dep%time)*1e-3 .ge. trc%stats%age_iso(q)-dt .and. &
-                            (0.0 - trc%dep%time)*1e-3 .le. trc%stats%age_iso(q)+dt, inds, n_ind) 
-
-                ! Calculate range mean/sd depth for given age range
-                if (n_ind .gt. 0) then
-                    write(*,*) "isochrones: ", i, j, q, n_ind 
- 
-                    trc%stats%depth_iso(i,j,q)     = calc_mean(real(trc%now%dpth(inds),prec_wrt))
-                    trc%stats%depth_iso_err(i,j,q) = calc_sd(real(trc%now%dpth(inds),prec_wrt), &
-                                                             trc%stats%depth_iso(i,j,q))
-                    trc%stats%density_iso(i,j,q)   = n_ind 
-
-                    trc%stats%dep_z_iso(i,j,q)     = calc_mean(real(trc%dep%z(inds),prec_wrt))
-                else 
-                    trc%stats%depth_iso(i,j,q)     = MV 
-                    trc%stats%depth_iso_err(i,j,q) = MV
-                    trc%stats%density_iso(i,j,q)   = MV
-                    
-                    trc%stats%dep_z_iso(i,j,q)     = MV 
-
-                end if 
-
-            end do 
-            
-            ! Calculate the ages of each depth layer 
-            nq = size(trc%stats%depth_norm)
-            do q = 1, nq 
-
-                ! Use dz_now to ensure that the first depth (0.04) includes all depths to the surface
-                dz_now = dz 
-                if (q .eq. 1) dz_now = dz*5.0 
-
-                ! Filter for active particles within the grid box and age of interest
-                call which (trc%now%active == 2 .and. &
-                            trc%now%x .gt. x(i)-dx(i) .and. trc%now%x .le. x(i)+dx(i+1) .and. &
-                            trc%now%y .gt. y(j)-dy(j) .and. trc%now%y .le. y(j)+dy(j+1) .and. &
-                            trc%now%dpth/trc%now%H .gt. trc%stats%depth_norm(q)-dz_now  .and. &
-                            trc%now%dpth/trc%now%H .le. trc%stats%depth_norm(q)+dz, inds, n_ind) 
-
-                ! Calculate range mean/sd age for given depth range
-                if (n_ind .gt. 0) then
-                    write(*,*) "ice_ages: ", i, j, q, n_ind 
- 
-                    trc%stats%ice_age(i,j,q)     = calc_mean(real(0.0-trc%dep%time(inds),prec_wrt))*1e-3
-                    trc%stats%ice_age_err(i,j,q) = calc_sd(real(0.0-trc%dep%time(inds),prec_wrt),trc%stats%ice_age(i,j,q))*1e-3
-                    trc%stats%density(i,j,q)     = n_ind 
-                else 
-                    trc%stats%ice_age(i,j,q)     = MV 
-                    trc%stats%ice_age_err(i,j,q) = MV 
-                    trc%stats%density(i,j,q)     = MV 
-                end if  
-
-            end do 
-
-        end do 
-        end do  
-        
-        return
-
-    end subroutine calc_tracer_stats
-
-    function calc_mean(x) result(mean)
-
-        implicit none 
-
-        real(prec_wrt), intent(IN) :: x(:) 
-        real(prec_wrt) :: mean 
-        integer :: n 
-
-        n = count(x.ne.MV)
-
-        if (n .gt. 0) then 
-            mean = sum(x,mask=x.ne.MV) / real(n)
-        else 
-            mean = MV 
-        end if 
-        
-        return 
-
-    end function calc_mean 
-
-    function calc_sd(x,mean) result(stdev)
-
-        implicit none 
-
-        real(prec_wrt), intent(IN) :: x(:) 
-        real(prec_wrt) :: mean 
-        real(prec_wrt) :: stdev 
-        integer :: n 
-
-        n = count(x.ne.MV)
-
-        if (n .gt. 0) then 
-            stdev = sqrt( sum((x - mean)**2) / real(n) )
-        else 
-            stdev = MV 
-        end if 
-
-        return 
-
-    end function calc_sd 
-
     ! ================================================
     !
     ! Initialization routines 
@@ -1057,23 +905,40 @@ contains
         character(len=*),       intent(IN)  :: filename 
         logical, intent(IN) :: is_sigma 
 
-        call nml_read(filename,"tracer_par","dt",            par%dt)
-        call nml_read(filename,"tracer_par","n",             par%n)
-        call nml_read(filename,"tracer_par","n_max_dep",     par%n_max_dep)
-        call nml_read(filename,"tracer_par","dt_dep",        par%dt_dep)
-        call nml_read(filename,"tracer_par","dt_write",      par%dt_write)
-        call nml_read(filename,"tracer_par","H_min",         par%H_min)
-        call nml_read(filename,"tracer_par","depth_max",     par%depth_max)
-        call nml_read(filename,"tracer_par","U_max",         par%U_max)
-        call nml_read(filename,"tracer_par","U_max_dep",     par%U_max_dep)
-        call nml_read(filename,"tracer_par","H_min_dep",     par%H_min_dep)
-        call nml_read(filename,"tracer_par","alpha",         par%alpha)
-        call nml_read(filename,"tracer_par","weight",        par%weight)
-        call nml_read(filename,"tracer_par","noise",         par%noise)
-        call nml_read(filename,"tracer_par","seed",          par%seed)
-        call nml_read(filename,"tracer_par","interp_method", par%interp_method)
-        call nml_read(filename,"tracer_par","par_trans_file",par%par_trans_file)
-    
+        ! Local variables
+        integer :: n_age_iso
+
+        call nml_read(filename,"trc","dt",            par%dt)
+        call nml_read(filename,"trc","n",             par%n)
+        call nml_read(filename,"trc","n_max_dep",     par%n_max_dep)
+        call nml_read(filename,"trc","dt_dep",        par%dt_dep)
+        call nml_read(filename,"trc","dt_write",      par%dt_write)
+        call nml_read(filename,"trc","H_min",         par%H_min)
+        call nml_read(filename,"trc","depth_max",     par%depth_max)
+        call nml_read(filename,"trc","U_max",         par%U_max)
+        call nml_read(filename,"trc","U_max_dep",     par%U_max_dep)
+        call nml_read(filename,"trc","H_min_dep",     par%H_min_dep)
+        call nml_read(filename,"trc","alpha",         par%alpha)
+        call nml_read(filename,"trc","weight",        par%weight)
+        call nml_read(filename,"trc","noise",         par%noise)
+        call nml_read(filename,"trc","seed",          par%seed)
+        call nml_read(filename,"trc","interp_method", par%interp_method)
+        call nml_read(filename,"trc","par_trans_file",par%par_trans_file)
+
+        ! Gridded statistics are opt-in. Their parameters are read only when the
+        ! stats flag is set, so a run that does not want them (e.g. the RH2003
+        ! profile) need not carry the extra namelist entries.
+        call nml_read(filename,"trc","stats",         par%stats)
+        if (par%stats) then
+            call nml_read(filename,"trc","dt_write_stats", par%dt_write_stats)
+            call nml_read(filename,"trc","n_depth",        par%n_depth)
+            call nml_read(filename,"trc","dt_iso",         par%dt_iso)
+            call nml_read(filename,"trc","n_age_iso",      n_age_iso)
+            if (allocated(par%age_iso)) deallocate(par%age_iso)
+            allocate(par%age_iso(n_age_iso))
+            call nml_read(filename,"trc","age_iso",        par%age_iso)
+        end if
+
         ! Define additional parameter values
         par%is_sigma  = is_sigma
         par%n_active  = 0
@@ -1082,11 +947,11 @@ contains
         par%is_profile = .FALSE.
 
         par%use_par_trans = .FALSE.
-        if (trim(par%par_trans_file) .ne. "None") then 
-            par%use_par_trans = .TRUE. 
+        if (trim(par%par_trans_file) .ne. "None") then
+            par%use_par_trans = .TRUE.
 
             call tracer_par_trans_load(par%tpar,par%par_trans_file)
-        end if 
+        end if
 
         ! Consistency checks
         if (trim(par%interp_method) .ne. "linear" .and. &
@@ -1106,9 +971,28 @@ contains
         end if
 
 
-        return 
+        return
 
     end subroutine tracer_par_load
+
+    function uniform_depth(n_depth) result(depth_norm)
+        ! n_depth normalized-depth levels, evenly spaced over (0,1] with the
+        ! deepest at 1. The shallowest is 1/n_depth, not 0: the surface band is
+        ! open at the top (a tracer shallower than the first level bins into it).
+
+        implicit none
+
+        integer, intent(IN) :: n_depth
+        real(prec_wrt) :: depth_norm(n_depth)
+        integer :: i
+
+        do i = 1, n_depth
+            depth_norm(i) = real(i,prec_wrt) / real(n_depth,prec_wrt)
+        end do
+
+        return
+
+    end function uniform_depth
     
     subroutine tracer_par_update(par,tpar,time)
         ! Update transient parameter values for current time 
@@ -1313,71 +1197,6 @@ contains
         return
 
     end subroutine tracer_deallocate
-
-    subroutine tracer_allocate_stats(stats,x,y)
-
-        implicit none 
-
-        type(tracer_stats_class), intent(INOUT) :: stats 
-        real(prec), intent(IN) :: x(:), y(:)
-        
-        ! Make surce object is deallocated
-        call tracer_deallocate_stats(stats)
-
-        ! Allocate tracer stats axes
-        allocate(stats%x(size(x)))
-        allocate(stats%y(size(y)))
-
-        ! Allocate tracer stats objects
-        allocate(stats%depth_norm(25))  ! To match Macgregor et al. (2015)
-        allocate(stats%age_iso(5))      ! To match Macgregor et al. (2015)
-        allocate(stats%depth_iso(size(x),size(y),size(stats%age_iso)))
-        allocate(stats%depth_iso_err(size(x),size(y),size(stats%age_iso)))
-        allocate(stats%dep_z_iso(size(x),size(y),size(stats%age_iso)))
-        allocate(stats%density_iso(size(x),size(y),size(stats%age_iso)))
-        allocate(stats%ice_age(size(x),size(y),size(stats%depth_norm)))
-        allocate(stats%ice_age_err(size(x),size(y),size(stats%depth_norm)))
-        allocate(stats%density(size(x),size(y),size(stats%depth_norm)))
-        
-        ! Also store axis information directly
-        stats%x = x 
-        stats%y = y 
-
-        ! Initialize arrays to zeros 
-        stats%depth_iso     = 0.0 
-        stats%depth_iso_err = 0.0
-        stats%dep_z_iso     = MV  
-        stats%density_iso   = MV 
-        stats%ice_age       = 0.0 
-        stats%ice_age_err   = 0.0 
-        stats%density       = MV 
-        
-        return
-
-    end subroutine tracer_allocate_stats
-
-    subroutine tracer_deallocate_stats(stats)
-
-        implicit none 
-
-        type(tracer_stats_class), intent(INOUT) :: stats 
-
-        ! Deallocate stats objects
-        if (allocated(stats%x))             deallocate(stats%x)
-        if (allocated(stats%y))             deallocate(stats%y)
-        if (allocated(stats%depth_norm))    deallocate(stats%depth_norm)
-        if (allocated(stats%age_iso))       deallocate(stats%age_iso)
-        if (allocated(stats%depth_iso))     deallocate(stats%depth_iso)
-        if (allocated(stats%depth_iso_err)) deallocate(stats%depth_iso_err)
-        if (allocated(stats%dep_z_iso))     deallocate(stats%dep_z_iso)
-        if (allocated(stats%density_iso))   deallocate(stats%density_iso)
-        if (allocated(stats%ice_age))       deallocate(stats%ice_age)
-        if (allocated(stats%ice_age_err))   deallocate(stats%ice_age_err)
-        if (allocated(stats%density))       deallocate(stats%density)
-        
-        return
-
-    end subroutine tracer_deallocate_stats
 
     subroutine reshape2D_optional(idx_order,var1,nx,ny,var)
         ! Reshape an optional deposition tagging field. When the caller omitted
