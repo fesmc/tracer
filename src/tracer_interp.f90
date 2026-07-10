@@ -267,14 +267,32 @@ contains
         real(prec),       intent(IN)    :: var(:,:,:)
 
         ! Local variables
-        integer :: bspline_flag 
+        integer :: bspline_flag
+        integer :: kx, ky, kz
 
-        call bspl3D%initialize(dble(x),dble(y),dble(z),dble(var),kx=4,ky=4,kz=4,iflag=bspline_flag)
-        
-        if (bspline_flag .ne. 0) then 
-            write(*,*) "interp_bspline3D_weights:: error initializing."
+        ! bspline-fortran requires 3 or more points on every axis, and an order
+        ! k with 2 <= k <= n-1. Cubic therefore needs n >= 5. The 2D profile
+        ! domain (tracer2D) carries a ghost y-axis of three points over which
+        ! the field is constant by construction, so the linear order it falls
+        ! back to is exact. Clamp per axis so a short dimension does not veto
+        ! cubic interpolation on the others.
+        kx = min(4,size(x,1)-1)
+        ky = min(4,size(y,1)-1)
+        kz = min(4,size(z,1)-1)
+
+        if (min(kx,ky,kz) .lt. 2) then
+            write(*,*) "interp_bspline3D_weights:: error: spline interpolation &
+            &needs at least 3 points on every axis. (nx,ny,nz) = ", &
+            size(x,1), size(y,1), size(z,1)
             error stop
-        end if     
+        end if
+
+        call bspl3D%initialize(dble(x),dble(y),dble(z),dble(var),kx=kx,ky=ky,kz=kz,iflag=bspline_flag)
+
+        if (bspline_flag .ne. 0) then
+            write(*,*) "interp_bspline3D_weights:: error initializing. iflag = ", bspline_flag
+            error stop
+        end if
 
         return 
 

@@ -8,14 +8,35 @@ module tracer2D
     use tracer3D
     use ncio    
 
-    implicit none 
+    implicit none
 
-    private 
-    public :: tracer2D_init 
-    public :: tracer2D_update 
-    public :: tracer2D_end 
+    ! Length of the ghost y-dimension. Three is the smallest axis bspline-fortran
+    ! will build a spline on, so interp_method="spline" needs at least this many
+    ! even though every field is constant along y.
+    integer, parameter :: NY_GHOST = 3
+
+    private
+    public :: tracer2D_init
+    public :: tracer2D_update
+    public :: tracer2D_end
 
 contains
+
+    function ghost_yaxis() result(y)
+        ! The ghost y-axis, spanning [0,1] with NY_GHOST evenly spaced points.
+
+        implicit none
+
+        real(prec) :: y(NY_GHOST)
+        integer    :: j
+
+        do j = 1, NY_GHOST
+            y(j) = real(j-1,prec) / real(NY_GHOST-1,prec)
+        end do
+
+        return
+
+    end function ghost_yaxis
 
 
     subroutine tracer2D_init(trc,filename,time,x,is_sigma)
@@ -28,13 +49,17 @@ contains
         logical,    intent(IN) :: is_sigma 
         real(prec_time) :: time 
 
-        real(prec) :: y(5) 
+        real(prec) :: y(NY_GHOST)
 
-        ! Define the ghost y-dimension
-        y(1:5) = [0.0,0.25,0.50,0.75,1.0] 
+        ! Define the ghost y-dimension. Must match tracer2D_update.
+        y = ghost_yaxis()
 
         ! Call 3D tracer_init
         call tracer_init(trc,filename,time,x,y,is_sigma)
+
+        ! Mark the domain as a profile, so that tracer_activate does not jitter
+        ! deposition locations along the ghost y-axis.
+        trc%par%is_profile = .TRUE.
 
         return 
 
@@ -62,7 +87,7 @@ contains
         logical,    intent(IN) :: dep_now, stats_now
 
         ! Local variables
-        real(prec) :: y(2) 
+        real(prec) :: y(NY_GHOST)
         real(prec), allocatable :: z_srf_2D(:,:), H_2D(:,:)
         real(prec), allocatable :: ux_3D(:,:,:), uy_3D(:,:,:), uz_3D(:,:,:)
         real(prec), allocatable :: lon_2D(:,:), lat_2D(:,:), t2m_ann_2D(:,:), t2m_sum_2D(:,:) 
@@ -89,10 +114,10 @@ contains
         if (present(pr_sum))   allocate(pr_sum_2D(size(x,1),ny))
         if (present(d18O_ann)) allocate(d18O_ann_2D(size(x,1),ny))
 
-        ! Set y-dimension to one value of zero
-        y(1:2) = [0.0,1.0]
+        ! Define the ghost y-dimension. Must match tracer2D_init.
+        y = ghost_yaxis()
 
-        ! Reshape input data with a ghost y-dimension of length two
+        ! Reshape input data, holding every field constant along the ghost y-axis
         do j = 1, size(y)
 
             z_srf_2D(:,j)    = z_srf

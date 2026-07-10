@@ -516,7 +516,7 @@ contains
         call tracer_reshape2D_field(idx_order,H,H1)
         call tracer_reshape3D_field(idx_order,age,age1,rev_z=rev_z)
         
-        ! Get axis sizes (if ny==2, this is a 2D profile domain) 
+        ! Get axis sizes (par%is_profile marks a 2D domain with a ghost y-axis)
         nx = size(x1,1)
         ny = size(y1,1)
         nz = size(z1,1)

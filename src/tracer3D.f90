@@ -20,8 +20,9 @@ module tracer3D
     end type 
 
     type tracer_par_class 
-        integer :: n, n_active, n_max_dep, id_max 
+        integer :: n, n_active, n_max_dep, id_max
         logical :: is_sigma                     ! Is the defined z-axis in sigma coords
+        logical :: is_profile                   ! Is this a 2D (x-z) domain with a ghost y-axis
         real(prec_time) :: dt, dt_dep, dt_write
         real(prec) :: H_min                     ! Minimum ice thickness to track (m)
         real(prec) :: depth_max                 ! Maximum depth of tracer (fraction)
@@ -308,7 +309,7 @@ contains
 
         end if
 
-        ! Get axis sizes (if ny==2, this is a 2D profile domain) 
+        ! Get axis sizes (par%is_profile marks a 2D domain with a ghost y-axis)
         nx = size(x1,1)
         ny = size(y1,1)
         nz = size(z1,1)
@@ -558,6 +559,13 @@ contains
 
             end select
 
+            ! A profile domain repeats every field along its ghost y-axis, so
+            ! each column would otherwise be selected once per ghost node,
+            ! spending n_max_dep on redundant tracers and shrinking the range of
+            ! x actually reached. Deposit into the first node only, which makes
+            ! deposition independent of the ghost axis length.
+            if (par%is_profile) p_init(:,2:) = 0.0
+
 !             ! Additionally adjust distribution according to latitude
 !             where (lat .lt. 70.0)
 !                 p_init = 0.0
@@ -580,19 +588,21 @@ contains
             ! Generate random numbers to populate points 
             allocate(jit(2,ntot))
 
-            if (par%noise) then 
+            if (par%noise) then
                 call random_number(jit)
                 jit = (jit - 0.5)
-                jit(1,:) = jit(1,:)*(x(2)-x(1)) 
+                jit(1,:) = jit(1,:)*(x(2)-x(1))
 
-                if (size(y,1) .gt. 2) then 
-                    jit(2,:) = jit(2,:)*(y(2)-y(1)) 
-                else   ! Profile
-                    jit(2,:) = 0.0 
-                end if 
-            else 
-                jit = 0.0 
-            end if 
+                ! The profile domain's y-axis is a ghost: every field is
+                ! constant along it, so jittering there is meaningless.
+                if (par%is_profile) then
+                    jit(2,:) = 0.0
+                else
+                    jit(2,:) = jit(2,:)*(y(2)-y(1))
+                end if
+            else
+                jit = 0.0
+            end if
 
     !         write(*,*) "range jit: ", minval(jit), maxval(jit)
     !         write(*,*) "npts: ", count(now%active == 0)
@@ -1065,8 +1075,11 @@ contains
         call nml_read(filename,"tracer_par","par_trans_file",par%par_trans_file)
     
         ! Define additional parameter values
-        par%is_sigma  = is_sigma 
-        par%n_active  = 0 
+        par%is_sigma  = is_sigma
+        par%n_active  = 0
+
+        ! A 3D domain unless the caller says otherwise; tracer2D_init sets this.
+        par%is_profile = .FALSE.
 
         par%use_par_trans = .FALSE.
         if (trim(par%par_trans_file) .ne. "None") then 
