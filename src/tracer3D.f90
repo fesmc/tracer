@@ -57,6 +57,8 @@ module tracer3D
         real(prec_time) :: time_dep, time_write 
         real(prec_time) :: dt  
         integer, allocatable :: active(:), id(:)
+        integer, allocatable :: parent(:)            ! id of the parent tracer if this is a clone, 0 if an original
+        integer, allocatable :: n_cloned(:)          ! number of clones already spawned from this tracer
         real(prec), allocatable :: x(:), y(:), z(:), sigma(:)
         real(prec), allocatable :: ux(:), uy(:), uz(:)
         real(prec), allocatable :: ax(:), ay(:), az(:)
@@ -152,12 +154,14 @@ contains
         ! Initialize state
         trc%now%active    = 0 
 
-        trc%now%id        = mv 
-        trc%now%x         = mv 
-        trc%now%y         = mv 
-        trc%now%z         = mv 
-        trc%now%sigma     = mv 
-        trc%now%z_srf     = mv 
+        trc%now%id        = mv
+        trc%now%parent    = mv
+        trc%now%n_cloned  = mv
+        trc%now%x         = mv
+        trc%now%y         = mv
+        trc%now%z         = mv
+        trc%now%sigma     = mv
+        trc%now%z_srf     = mv
         trc%now%dpth      = mv 
         trc%now%ux        = mv 
         trc%now%uy        = mv 
@@ -626,8 +630,10 @@ contains
 
                         now%active(j) = 1
                         k = k + 1
-                        par%id_max = par%id_max+1 
-                        now%id(j)  = par%id_max 
+                        par%id_max = par%id_max+1
+                        now%id(j)  = par%id_max
+                        now%parent(j)   = 0    ! surface-deposited original, not a clone
+                        now%n_cloned(j) = 0
 
                         ij = maxloc(p,mask=p.gt.0.0)
                         now%x(j) = x(ij(1)) + jit(1,k)
@@ -683,10 +689,12 @@ contains
                 trc%now%x .lt. minval(x) .or. trc%now%x .gt. maxval(x)  .or. &
                 trc%now%y .lt. minval(y) .or. trc%now%y .gt. maxval(y) ) ) 
 
-            trc%now%active    = 0 
+            trc%now%active    = 0
 
-            trc%now%id        = mv 
-            trc%now%x         = mv 
+            trc%now%id        = mv
+            trc%now%parent    = mv
+            trc%now%n_cloned  = mv
+            trc%now%x         = mv
             trc%now%y         = mv 
             trc%now%z         = mv 
             trc%now%sigma     = mv 
@@ -1135,6 +1143,7 @@ contains
         ! Allocate tracer 
         allocate(now%active(n))
         allocate(now%id(n))
+        allocate(now%parent(n),now%n_cloned(n))
         allocate(now%x(n),now%y(n),now%z(n),now%sigma(n))
         allocate(now%z_srf(n),now%dpth(n))
         allocate(now%ux(n),now%uy(n),now%uz(n))
@@ -1163,6 +1172,9 @@ contains
         
         ! Deallocate state objects
         if (allocated(now%active))    deallocate(now%active)
+        if (allocated(now%id))        deallocate(now%id)
+        if (allocated(now%parent))    deallocate(now%parent)
+        if (allocated(now%n_cloned))  deallocate(now%n_cloned)
         if (allocated(now%x))         deallocate(now%x)
         if (allocated(now%y))         deallocate(now%y)
         if (allocated(now%z))         deallocate(now%z)

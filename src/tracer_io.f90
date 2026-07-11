@@ -115,6 +115,10 @@ contains
         call nc_write(path_out,"id",trc%now%id,dim1="pt",dim2="time", missing_value=int(mv_wrt), &
                         start=[1,nt],count=[trc%par%n ,1])
 
+        ! Lineage: id of the parent tracer for clones, 0 for surface-deposited originals
+        call nc_write(path_out,"parent",trc%now%parent,dim1="pt",dim2="time", missing_value=int(mv_wrt), &
+                        start=[1,nt],count=[trc%par%n ,1])
+
         tmp = mv_wrt
         where(trc%dep%time .ne. mv_wrt) tmp = time-trc%dep%time
         call nc_write(path_out,"age",tmp,dim1="pt",dim2="time", missing_value=mv_wrt, &
