@@ -23,6 +23,16 @@
 
     stats = False               ! No gridded statistics for the idealized profile
 
+    ! Particle cloning (opt-in): spawn offset copies of deep, slow, aged tracers
+    clone            = False
+    n_clones         = 3           ! clones per eligible tracer
+    clone_depth_frac = 0.5         ! eligible at/below this depth (fraction of H)
+    clone_U_max      = 20.0        ! eligible below this horizontal speed (m/a)
+    clone_dep_time_min = -130000.0 ! deposition-time window lower bound (years)
+    clone_dep_time_max = -115000.0 ! deposition-time window upper bound (years)
+    clone_offset_xy  = 5000.0      ! horizontal offset half-width (m)
+    clone_offset_z   = 50.0        ! max upward vertical offset (m)
+
 /
 
 &rh_par

@@ -37,6 +37,17 @@ module tracer3D
         integer    :: seed                      ! RNG seed; <= 0 => nondeterministic
         character(len=56) :: interp_method
 
+        ! Particle cloning: spawn offset copies of deep, slow, well-aged tracers
+        ! to raise the odds that old deposition times survive to present day.
+        logical    :: clone                     ! Enable cloning
+        integer    :: n_clones                  ! Clones spawned per eligible tracer
+        real(prec) :: clone_depth_frac          ! Min depth (fraction of H) to be eligible
+        real(prec) :: clone_U_max               ! Max horizontal velocity to be eligible (m/a)
+        real(prec) :: clone_dep_time_min        ! Deposition-time window, lower bound (years)
+        real(prec) :: clone_dep_time_max        ! Deposition-time window, upper bound (years)
+        real(prec) :: clone_offset_xy           ! Half-width of uniform horizontal offset (m)
+        real(prec) :: clone_offset_z            ! Max upward vertical offset (m)
+
         ! Transient parameters
         character(len=512) :: par_trans_file
         logical            :: use_par_trans
@@ -403,8 +414,12 @@ contains
             trc%now%dpth = MV
         end where
 
-        ! Destroy points that moved outside the valid region 
+        ! Destroy points that moved outside the valid region
         call tracer_deactivate(trc,x1,y1,maxval(H1))
+
+        ! Clone eligible tracers into freed slots, before deposition claims them,
+        ! so surviving old tracers take priority over fresh surface deposition.
+        call tracer_clone(trc%par,trc%now,trc%dep,x1,y1)
 
         ! Activate new tracers if desired
         if (dep_now) call tracer_activate(trc%par,trc%now,x1,y1,H=H1,lat=lat1, &
@@ -715,9 +730,136 @@ contains
 
         end where 
 
-        return 
+        return
 
-    end subroutine tracer_deactivate 
+    end subroutine tracer_deactivate
+
+    subroutine tracer_clone(par,now,dep,x,y)
+        ! Spawn offset copies of tracers that are deep, slow-moving and within a
+        ! deposition-time window, to raise the chance that old deposition times
+        ! survive to present day. A clone inherits the full state and deposition
+        ! record of its parent, offset by a random horizontal displacement and a
+        ! random upward vertical displacement. This injects diffusion into an
+        ! otherwise deterministic advection.
+        implicit none
+
+        type(tracer_par_class),   intent(INOUT) :: par
+        type(tracer_state_class), intent(INOUT) :: now
+        type(tracer_dep_class),   intent(INOUT) :: dep
+        real(prec), intent(IN) :: x(:), y(:)
+
+        integer    :: i, j, c
+        real(prec) :: xmin, xmax, ymin, ymax
+        real(prec) :: off(3)
+
+        if (.not. par%clone) return
+
+        xmin = minval(x); xmax = maxval(x)
+        ymin = minval(y); ymax = maxval(y)
+
+        ! Only originals (parent == 0) that have not yet cloned are eligible.
+        ! Clones carry parent > 0, so they are excluded here and clones-of-clones
+        ! never occur. Freshly spawned clones are written into slots j and given
+        ! parent > 0, so when the outer loop later reaches slot j it skips it.
+        do i = 1, par%n
+
+            if ( now%active(i)   .eq. 2 .and. &
+                 now%parent(i)   .eq. 0 .and. &
+                 now%n_cloned(i) .eq. 0 ) then
+
+                ! Eligibility: deep enough, slow enough, within the dep-time window
+                if ( now%H(i) .gt. 0.0                                        .and. &
+                     now%dpth(i)/now%H(i) .ge. par%clone_depth_frac           .and. &
+                     sqrt(now%ux(i)**2 + now%uy(i)**2) .lt. par%clone_U_max    .and. &
+                     dep%time(i) .ge. par%clone_dep_time_min                   .and. &
+                     dep%time(i) .le. par%clone_dep_time_max ) then
+
+                    ! Fill up to n_clones free slots with offset copies of tracer i
+                    c = 0
+                    do j = 1, par%n
+
+                        if (now%active(j) .eq. 0) then
+
+                            call random_number(off)   ! off in [0,1)
+
+                            ! Copy full state from the parent
+                            now%active(j)   = 2
+                            par%id_max      = par%id_max + 1
+                            now%id(j)       = par%id_max
+                            now%parent(j)   = now%id(i)
+                            now%n_cloned(j) = 0
+
+                            now%sigma(j) = now%sigma(i)
+                            now%z_srf(j) = now%z_srf(i)
+                            now%ux(j)    = now%ux(i)
+                            now%uy(j)    = now%uy(i)
+                            now%uz(j)    = now%uz(i)
+                            now%ax(j)    = now%ax(i)
+                            now%ay(j)    = now%ay(i)
+                            now%az(j)    = now%az(i)
+                            now%thk(j)   = now%thk(i)
+                            now%T(j)     = now%T(i)
+                            now%H(j)     = now%H(i)
+
+                            ! Offset position: horizontal uniform in [-1,1]*offset,
+                            ! vertical uniform upward in [0,1]*offset (raises z).
+                            now%x(j) = now%x(i) + (2.0*off(1)-1.0)*par%clone_offset_xy
+                            now%z(j) = now%z(i) + off(3)*par%clone_offset_z
+
+                            if (now%x(j) .lt. xmin) now%x(j) = xmin
+                            if (now%x(j) .gt. xmax) now%x(j) = xmax
+
+                            ! The profile domain's y-axis is a ghost (all fields
+                            ! constant along it), so no meaningful offset there.
+                            if (par%is_profile) then
+                                now%y(j) = now%y(i)
+                            else
+                                now%y(j) = now%y(i) + (2.0*off(2)-1.0)*par%clone_offset_xy
+                                if (now%y(j) .lt. ymin) now%y(j) = ymin
+                                if (now%y(j) .gt. ymax) now%y(j) = ymax
+                            end if
+
+                            ! Depth follows from the offset z; z_srf/H/velocities
+                            ! re-interpolate at the clone's own location next step.
+                            now%dpth(j) = max(now%z_srf(j) - now%z(j), 0.0)
+
+                            ! Copy the deposition record: a clone shares its
+                            ! parent's age and provenance exactly.
+                            dep%time(j)      = dep%time(i)
+                            dep%H(j)         = dep%H(i)
+                            dep%x(j)         = dep%x(i)
+                            dep%y(j)         = dep%y(i)
+                            dep%z(j)         = dep%z(i)
+                            dep%lon(j)       = dep%lon(i)
+                            dep%lat(j)       = dep%lat(i)
+                            dep%t2m_ann(j)   = dep%t2m_ann(i)
+                            dep%t2m_sum(j)   = dep%t2m_sum(i)
+                            dep%pr_ann(j)    = dep%pr_ann(i)
+                            dep%pr_sum(j)    = dep%pr_sum(i)
+                            dep%t2m_prann(j) = dep%t2m_prann(i)
+                            dep%d18O_ann(j)  = dep%d18O_ann(i)
+
+                            c = c + 1
+
+                        end if
+
+                        if (c .ge. par%n_clones) exit
+
+                    end do
+
+                    ! Record how many clones were made. If the array was full
+                    ! (c == 0) the tracer stays eligible and retries next step.
+                    now%n_cloned(i) = c
+
+                end if
+
+            end if
+
+        end do
+
+        return
+
+    end subroutine tracer_clone
 
     ! ================================================
     !
@@ -933,6 +1075,21 @@ contains
         call nml_read(filename,"trc","interp_method", par%interp_method)
         call nml_read(filename,"trc","par_trans_file",par%par_trans_file)
 
+        ! Cloning is opt-in. Its knobs are read only when enabled, so a run that
+        ! does not clone need not carry the extra namelist entries.
+        call nml_read(filename,"trc","clone",         par%clone)
+        if (par%clone) then
+            call nml_read(filename,"trc","n_clones",           par%n_clones)
+            call nml_read(filename,"trc","clone_depth_frac",   par%clone_depth_frac)
+            call nml_read(filename,"trc","clone_U_max",        par%clone_U_max)
+            call nml_read(filename,"trc","clone_dep_time_min", par%clone_dep_time_min)
+            call nml_read(filename,"trc","clone_dep_time_max", par%clone_dep_time_max)
+            call nml_read(filename,"trc","clone_offset_xy",    par%clone_offset_xy)
+            call nml_read(filename,"trc","clone_offset_z",     par%clone_offset_z)
+        else
+            par%n_clones = 0
+        end if
+
         ! Gridded statistics are opt-in. Their parameters are read only when the
         ! stats flag is set, so a run that does not want them (e.g. the RH2003
         ! profile) need not carry the extra namelist entries.
@@ -976,6 +1133,17 @@ contains
             write(0,*) "tracer_init:: error: weight must be 'vel', 'linear', &
             &'quadratic' or 'rand': "//trim(par%weight)
             error stop
+        end if
+
+        if (par%clone) then
+            if (par%n_clones .lt. 1) then
+                write(0,*) "tracer_init:: error: n_clones must be >= 1 when clone = .TRUE."
+                error stop
+            end if
+            if (par%clone_depth_frac .le. 0.0 .or. par%clone_depth_frac .gt. 1.0) then
+                write(0,*) "tracer_init:: error: clone_depth_frac must be in (0,1]: ", par%clone_depth_frac
+                error stop
+            end if
         end if
 
 

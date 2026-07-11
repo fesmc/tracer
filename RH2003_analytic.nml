@@ -23,6 +23,8 @@
 
     stats = False               ! No gridded statistics for the idealized profile
 
+    clone = False               ! Single-particle analytic test, no cloning
+
 /
 
 &rh_par
