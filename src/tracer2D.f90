@@ -137,10 +137,12 @@ contains
 
         end do
 
-        ! Now update tracers using 3D call 
+        ! Now update tracers using 3D call. Velocities are already on aa-nodes
+        ! here, so the native staggered axes (x_ux/y_uy/z_uz) are left absent.
         call tracer_update(trc,time,x,y,z,z_srf_2D,H_2D,ux_3D,uy_3D,uz_3D, &
-                            lon_2D,lat_2D,t2m_ann_2D,t2m_sum_2D,pr_ann_2D,pr_sum_2D,d18O_ann_2D, &
-                            dep_now,stats_now,order="ijk")
+                            lon=lon_2D,lat=lat_2D,t2m_ann=t2m_ann_2D,t2m_sum=t2m_sum_2D, &
+                            pr_ann=pr_ann_2D,pr_sum=pr_sum_2D,d18O_ann=d18O_ann_2D, &
+                            dep_now=dep_now,stats_now=stats_now,order="ijk")
 
         return 
 

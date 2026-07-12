@@ -205,16 +205,29 @@ contains
     end subroutine tracer_init
 
     subroutine tracer_update(trc,time,x,y,z,z_srf,H,ux,uy,uz,              &
+                             x_ux,y_uy,z_uz,                                &
                              lon,lat,t2m_ann,t2m_sum,pr_ann,pr_sum,d18O_ann, &
                              dep_now,stats_now,order,sigma_srf)
 
-        implicit none 
+        implicit none
 
-        type(tracer_class), intent(INOUT) :: trc 
-        real(prec_time), intent(IN) :: time 
+        type(tracer_class), intent(INOUT) :: trc
+        real(prec_time), intent(IN) :: time
         real(prec), intent(IN) :: x(:), y(:), z(:)
         real(prec), intent(IN) :: z_srf(:,:), H(:,:)
         real(prec), intent(IN) :: ux(:,:,:), uy(:,:,:), uz(:,:,:)
+
+        ! Native staggered velocity axes (all optional). When present, the
+        ! matching component is interpolated directly on its Arakawa-C location
+        ! instead of requiring the host to pre-destagger it to aa-nodes:
+        !   x_ux - acx x-axis for ux (ux staggered in x; y and sigma stay aa)
+        !   y_uy - acy y-axis for uy (uy staggered in y; x and sigma stay aa)
+        !   z_uz - zeta_ac sigma/height axis for uz (uz staggered in z; x and y
+        !          stay aa). These interface levels are typically one longer
+        !          than z, so size(uz,3) may differ from size(ux,3).
+        ! Any axis left absent falls back to the aa axis (x, y, z), so the pure
+        ! aa-node call is unchanged.
+        real(prec), intent(IN), optional :: x_ux(:), y_uy(:), z_uz(:)
 
         ! Deposition tagging fields. All optional: a caller that only wants to
         ! advect particles need not synthesize climate forcing. Any field left
@@ -229,17 +242,21 @@ contains
         real(prec), intent(IN), optional :: sigma_srf     ! Value at surface by default (1 or 0?)
 
         ! Local variables  
-        character(len=3) :: idx_order 
-        integer    :: i, j, k, nx, ny, nz
-        logical    :: rev_z 
+        character(len=3) :: idx_order
+        integer    :: i, j, k, nx, ny, nz, nz_uz
+        logical    :: rev_z, rev_z_uz, has_srf
+        real(prec) :: sigma_srf_val
         real(prec), allocatable :: x1(:), y1(:), z1(:)
-        real(prec), allocatable :: zc(:)   ! Actual cartesian z-axis after applying sigma*H 
+        real(prec), allocatable :: x_ux1(:), y_uy1(:), z_uz1(:)
         real(prec), allocatable :: z_srf1(:,:), H1(:,:)
         real(prec), allocatable :: ux1(:,:,:), uy1(:,:,:), uz1(:,:,:)
         real(prec), allocatable :: usig1(:,:,:)
+        real(prec), allocatable :: ux_srf_aa(:,:), uy_srf_aa(:,:)
         real(prec), allocatable :: lon1(:,:), lat1(:,:), t2m_ann1(:,:), t2m_sum1(:,:), pr_ann1(:,:), pr_sum1(:,:), d18O_ann1(:,:)
-        real(prec) :: ux0, uy0, uz0 
-        real(prec) :: dt 
+        real(prec) :: ux0, uy0, uz0
+        real(prec) :: sigp                        ! Normalized sigma of a particle (z relative to its column)
+        type(lin3_interp_par_type) :: par_pt      ! Thread-local bilinear weights (kept off the shared par_lin for OpenMP)
+        real(prec) :: dt
 
         ! Update the transient parameters
         if (trc%par%use_par_trans) then 
@@ -258,48 +275,51 @@ contains
         idx_order = "ijk"
         if (present(order)) idx_order = trim(order)
 
-        ! Allocate helper z-axis variable 
-        if (allocated(zc)) deallocate(zc)
-        allocate(zc(size(z)))
-
-        zc = z 
-
-        if (trc%par%is_sigma) then 
-            ! Ensure z-axis is properly bounded
-            where (abs(zc) .lt. 1e-5) zc = 0.0 
-
-            if (minval(zc) .lt. 0.0 .or. maxval(zc) .gt. 1.0) then 
-                write(0,*) "tracer:: error: sigma axis not bounded between zero and one."
-                write(0,*) "z = ", zc 
-                error stop
-            end if
-
-        end if 
+        ! Surface-orientation flag (sigma_srf) as a plain value, so the axis
+        ! preparation can be shared by the aa z-axis and the uz interface axis.
+        has_srf = present(sigma_srf)
+        sigma_srf_val = 0.0
+        if (has_srf) sigma_srf_val = sigma_srf
 
         ! Note: GRISLI (nx,ny,nz): sigma goes from 1 to 0, so sigma(1)=1 [surface], sigma(nz)=0 [base]
         !       SICO (nz,ny,nx): sigma(1) = 0, sigma(nz) = 1
         ! reshape routines ensure ascending z-axis (nx,ny,nz) with sigma(nz)=1 [surface]
-        
-        ! Correct the sigma values if necessary,
-        ! so that sigma==0 [base]; sigma==1 [surface]
-        if (trc%par%is_sigma .and. present(sigma_srf)) then 
-            if (sigma_srf .eq. 0.0) then 
-                ! Adjust sigma values 
-                zc = 1.0 - zc 
-            end if 
-        end if 
 
-        ! Also determine whether z-axis is initially ascending or descending 
-        rev_z = (zc(1) .gt. zc(size(zc)))
+        ! Prepare the aa z-axis (used by ux, uy, and by uz when z_uz is absent).
+        call prepare_sigma_axis(z,trc%par%is_sigma,has_srf,sigma_srf_val,z1,rev_z)
+
+        ! Prepare the uz vertical axis. With z_uz present, uz is sampled on its
+        ! native interface levels (zeta_ac); absent, it shares the aa z-axis.
+        if (present(z_uz)) then
+            call prepare_sigma_axis(z_uz,trc%par%is_sigma,has_srf,sigma_srf_val,z_uz1,rev_z_uz)
+        else
+            z_uz1    = z1
+            rev_z_uz = rev_z
+        end if
 
         call tracer_reshape1D_vec(x, x1,rev=.FALSE.)
         call tracer_reshape1D_vec(y, y1,rev=.FALSE.)
-        call tracer_reshape1D_vec(real(zc,kind=prec),z1,rev=rev_z)
+
+        ! Horizontal staggered axes for ux (acx) and uy (acy). Absent => aa.
+        if (present(x_ux)) then
+            call tracer_reshape1D_vec(x_ux, x_ux1,rev=.FALSE.)
+        else
+            x_ux1 = x1
+        end if
+        if (present(y_uy)) then
+            call tracer_reshape1D_vec(y_uy, y_uy1,rev=.FALSE.)
+        else
+            y_uy1 = y1
+        end if
+
         call tracer_reshape2D_field(idx_order,z_srf,z_srf1)
         call tracer_reshape2D_field(idx_order,H,H1)
+
+        ! Each component is reshaped on its own vertical orientation: ux/uy on
+        ! the aa z-axis, uz on the (possibly distinct) interface axis.
         call tracer_reshape3D_field(idx_order,ux,ux1,rev_z=rev_z)
         call tracer_reshape3D_field(idx_order,uy,uy1,rev_z=rev_z)
-        call tracer_reshape3D_field(idx_order,uz,uz1,rev_z=rev_z)
+        call tracer_reshape3D_field(idx_order,uz,uz1,rev_z=rev_z_uz)
         
         if (dep_now) then
             ! Also reshape deposition fields. H1 is already reshaped, so it
@@ -315,70 +335,85 @@ contains
         end if
 
         ! Get axis sizes (par%is_profile marks a 2D domain with a ghost y-axis)
-        nx = size(x1,1)
-        ny = size(y1,1)
-        nz = size(z1,1)
+        nx    = size(x1,1)
+        ny    = size(y1,1)
+        nz    = size(z1,1)
+        nz_uz = size(z_uz1,1)
 
         if (trim(trc%par%interp_method) .eq. "spline") then
 
-            ! Allocate z-velocity field in sigma coordinates 
+            ! Allocate z-velocity field in sigma coordinates. uz lives on its
+            ! own vertical axis, so use nz_uz here rather than nz.
             if (allocated(usig1)) deallocate(usig1)
-            allocate(usig1(nx,ny,nz))
+            allocate(usig1(nx,ny,nz_uz))
 
             usig1 = 0.0
-            do k = 1, nz 
+            do k = 1, nz_uz
                 where (H1 .gt. 0.0) usig1(:,:,k) = uz1(:,:,k) / H1
-            end do 
+            end do
 
-            call interp_bspline3D_weights(bspline3d_ux,x1,y1,z1,ux1)
-            call interp_bspline3D_weights(bspline3d_uy,x1,y1,z1,uy1)
-            call interp_bspline3D_weights(bspline3d_uz,x1,y1,z1,usig1)
-            
+            ! Each spline is built on its component's native axes.
+            call interp_bspline3D_weights(bspline3d_ux,x_ux1,y1,z1,ux1)
+            call interp_bspline3D_weights(bspline3d_uy,x1,y_uy1,z1,uy1)
+            call interp_bspline3D_weights(bspline3d_uz,x1,y1,z_uz1,usig1)
+
             write(*,*) "spline weights calculated."
-        end if 
+        end if
 
-        ! Interpolate to the get the right elevation and other deposition quantities
-        do i = 1, trc%par%n 
+        ! Interpolate to get the right elevation and velocity at each particle.
+        ! The particles are independent (each writes only its own index i), so
+        ! this loop is embarrassingly parallel. Weights (par_pt) are thread-local;
+        ! the velocity splines are firstprivate so each thread evaluates its own
+        ! copy — the bspline evaluate mutates an internal search cache, which
+        ! would otherwise race. The pragmas are inert unless built with openmp=1.
+        !$omp parallel do default(shared) schedule(dynamic,64) &
+        !$omp   private(i,par_pt,ux0,uy0,uz0,sigp) &
+        !$omp   firstprivate(bspline3d_ux,bspline3d_uy,bspline3d_uz)
+        do i = 1, trc%par%n
 
-            if (trc%now%active(i) .eq. 2) then 
+            if (trc%now%active(i) .eq. 2) then
 
                 ! Temporarily store velocity of this time step (for accelaration calculation)
                 ux0 = trc%now%ux(i)
                 uy0 = trc%now%uy(i)
-                uz0 = trc%now%uz(i) 
+                uz0 = trc%now%uz(i)
 
-                ! Linear interpolation used for surface position 
-                par_lin = interp_bilinear_weights(x1,y1,xout=trc%now%x(i),yout=trc%now%y(i))
-                trc%now%H(i)     = interp_bilinear(par_lin,H1)
-                trc%now%z_srf(i) = interp_bilinear(par_lin,z_srf1)
+                ! Linear interpolation used for surface position
+                par_pt = interp_bilinear_weights(x1,y1,xout=trc%now%x(i),yout=trc%now%y(i))
+                trc%now%H(i)     = interp_bilinear(par_pt,H1)
+                trc%now%z_srf(i) = interp_bilinear(par_pt,z_srf1)
                 trc%now%z(i)     = trc%now%z_srf(i) - trc%now%dpth(i)
 
-                ! Calculate zc-axis for the current point
-                ! (z_bedrock + ice thickness)
-                ! Note: equivalent to (z_srf - depth) = trc%now%z_srf(i) - (1.0-z1)*trc%now%H(i)
-                zc = (trc%now%z_srf(i)-trc%now%H(i)) + z1*trc%now%H(i)
-
-                if (trim(trc%par%interp_method) .eq. "linear") then 
-                    ! Trilinear interpolation 
-
-                    ! Note: currently we redundantly obtain bilinear (horizontal) weights, because
-                    ! they are needed to calculate zc. In the future, this could be improved. 
-
-                    par_lin = interp_trilinear_weights(x1,y1,zc,xout=trc%now%x(i),yout=trc%now%y(i),zout=trc%now%z(i))
-
-                    trc%now%ux(i)  = interp_trilinear(par_lin,ux1)
-                    trc%now%uy(i)  = interp_trilinear(par_lin,uy1)
-                    trc%now%uz(i)  = interp_trilinear(par_lin,uz1)
+                if (trim(trc%par%interp_method) .eq. "linear") then
+                    ! Trilinear interpolation, each component on its own axes.
+                    ! interp_vel_linear rebuilds the cartesian z-levels from the
+                    ! component's sigma axis, so ux/uy/uz are sampled directly on
+                    ! their native (acx / acy / zeta_ac) locations.
+                    trc%now%ux(i) = interp_vel_linear(x_ux1,y1,z1,ux1, &
+                        trc%now%x(i),trc%now%y(i),trc%now%z(i),trc%now%z_srf(i),trc%now%H(i))
+                    trc%now%uy(i) = interp_vel_linear(x1,y_uy1,z1,uy1, &
+                        trc%now%x(i),trc%now%y(i),trc%now%z(i),trc%now%z_srf(i),trc%now%H(i))
+                    trc%now%uz(i) = interp_vel_linear(x1,y1,z_uz1,uz1, &
+                        trc%now%x(i),trc%now%y(i),trc%now%z(i),trc%now%z_srf(i),trc%now%H(i))
 
                 else
-                    ! Spline interpolation 
-                    trc%now%ux(i) = interp_bspline3D(bspline3d_ux,trc%now%x(i),trc%now%y(i),trc%now%z(i)/trc%now%H(i))
-                    trc%now%uy(i) = interp_bspline3D(bspline3d_uy,trc%now%x(i),trc%now%y(i),trc%now%z(i)/trc%now%H(i))
-                    trc%now%uz(i) = interp_bspline3D(bspline3d_uz,trc%now%x(i),trc%now%y(i),trc%now%z(i)/trc%now%H(i)) *trc%now%H(i)  ! sigma => m
+                    ! Spline interpolation, each spline built on its own axes. The
+                    ! vertical coordinate is the particle's normalized sigma
+                    ! (z relative to its own column base), not z/H — the latter
+                    ! left the [0,1] knot range wherever the bed is not at z=0.
+                    ! The horizontal clamp mirrors the linear path so the acx/acy
+                    ! half-cell edge strip samples the nearest face.
+                    sigp = (trc%now%z(i) - (trc%now%z_srf(i)-trc%now%H(i))) / trc%now%H(i)
+                    trc%now%ux(i) = interp_vel_spline(bspline3d_ux,x_ux1,y1, &
+                        trc%now%x(i),trc%now%y(i),sigp)
+                    trc%now%uy(i) = interp_vel_spline(bspline3d_uy,x1,y_uy1, &
+                        trc%now%x(i),trc%now%y(i),sigp)
+                    trc%now%uz(i) = interp_vel_spline(bspline3d_uz,x1,y1, &
+                        trc%now%x(i),trc%now%y(i),sigp) *trc%now%H(i)  ! sigma => m
 
-                end if 
+                end if
 
-                ! Update acceleration term 
+                ! Update acceleration term
                 trc%now%ax(i) = (trc%now%ux(i) - ux0) / trc%now%dt
                 trc%now%ay(i) = (trc%now%uy(i) - uy0) / trc%now%dt
                 trc%now%az(i) = (trc%now%uz(i) - uz0) / trc%now%dt
@@ -386,12 +421,13 @@ contains
                 ! Filler values of the tracer state, in the future these should
                 ! equal the surface temperature and the accumulation rate at the time of
                 ! deposition and be calculated otherwise
-                trc%now%T(i)   = 260.0 
-                trc%now%thk(i) = 0.3 
+                trc%now%T(i)   = 260.0
+                trc%now%thk(i) = 0.3
 
-            end if 
+            end if
 
-        end do 
+        end do
+        !$omp end parallel do
 
         ! Update the tracer thickness, then destroy points that are too thin
         ! == TO DO ==
@@ -421,9 +457,21 @@ contains
         ! so surviving old tracers take priority over fresh surface deposition.
         call tracer_clone(trc%par,trc%now,trc%dep,x1,y1)
 
-        ! Activate new tracers if desired
-        if (dep_now) call tracer_activate(trc%par,trc%now,x1,y1,H=H1,lat=lat1, &
-                                ux_srf=ux1(:,:,nz),uy_srf=uy1(:,:,nz),nmax=trc%par%n_max_dep)
+        ! Activate new tracers if desired. The deposition weighting needs ux and
+        ! uy co-located, so in the native staggered case destagger the surface
+        ! slices to aa-nodes first (identity when a component is already aa).
+        if (dep_now) then
+            if (present(x_ux) .or. present(y_uy)) then
+                ux_srf_aa = destagger_to_aa(x_ux1,y1,ux1(:,:,nz),x1,y1)
+                uy_srf_aa = destagger_to_aa(x1,y_uy1,uy1(:,:,nz),x1,y1)
+            else
+                ux_srf_aa = ux1(:,:,nz)
+                uy_srf_aa = uy1(:,:,nz)
+            end if
+
+            call tracer_activate(trc%par,trc%now,x1,y1,H=H1,lat=lat1, &
+                                ux_srf=ux_srf_aa,uy_srf=uy_srf_aa,nmax=trc%par%n_max_dep)
+        end if
 
         ! Finish activation for necessary points 
         do i = 1, trc%par%n 
@@ -431,18 +479,21 @@ contains
             if (trc%now%active(i) .eq. 1) then 
                 ! Point became active now, further initializations needed below
 
-                ! Point is at the surface, so only bilinear interpolation is needed
+                ! Point is at the surface, so only bilinear interpolation is
+                ! needed. z_srf and H (aa fields) use aa weights; each velocity
+                ! component uses weights on its own horizontal axis and its own
+                ! top sigma level (the surface).
                 par_lin = interp_bilinear_weights(x1,y1,xout=trc%now%x(i),yout=trc%now%y(i))
 
                 ! Apply interpolation weights to variables
                 trc%now%dpth(i)  = 0.01   ! Always deposit just below the surface (eg 1 cm) to avoid zero z-velocity
                 trc%now%z_srf(i) = interp_bilinear(par_lin,z_srf1)
                 trc%now%z(i)     = trc%now%z_srf(i)-trc%now%dpth(i)
-                
+
                 trc%now%H(i)     = interp_bilinear(par_lin,H1)
-                trc%now%ux(i)    = interp_bilinear(par_lin,ux1(:,:,nz))
-                trc%now%uy(i)    = interp_bilinear(par_lin,uy1(:,:,nz))
-                trc%now%uz(i)    = interp_bilinear(par_lin,uz1(:,:,nz)) 
+                trc%now%ux(i)    = interp_bilinear(interp_bilinear_weights(x_ux1,y1,xout=trc%now%x(i),yout=trc%now%y(i)),ux1(:,:,nz))
+                trc%now%uy(i)    = interp_bilinear(interp_bilinear_weights(x1,y_uy1,xout=trc%now%x(i),yout=trc%now%y(i)),uy1(:,:,nz))
+                trc%now%uz(i)    = interp_bilinear(par_lin,uz1(:,:,nz_uz))
                 trc%now%ax(i)    = 0.0 
                 trc%now%ay(i)    = 0.0 
                 trc%now%az(i)    = 0.0
@@ -883,11 +934,147 @@ contains
             y = y + uy*dt + 0.5*ay*dt**2 
             z = z + uz*dt + 0.5*az*dt**2
             
-        end if 
+        end if
 
-        return 
+        return
 
     end subroutine calc_position
+
+    subroutine prepare_sigma_axis(z,is_sigma,has_srf,sigma_srf,z1,rev)
+        ! Turn a raw vertical axis into an ascending axis (z1) plus the flag
+        ! saying whether the input was reversed. Shared by the aa z-axis and the
+        ! uz interface axis (zeta_ac) so both get identical sigma bounding and
+        ! surface-orientation handling.
+
+        implicit none
+
+        real(prec), intent(IN)  :: z(:)
+        logical,    intent(IN)  :: is_sigma, has_srf
+        real(prec), intent(IN)  :: sigma_srf
+        real(prec), intent(INOUT), allocatable :: z1(:)
+        logical,    intent(OUT) :: rev
+
+        real(prec), allocatable :: za(:)
+
+        allocate(za(size(z)))
+        za = z
+
+        if (is_sigma) then
+            ! Ensure z-axis is properly bounded
+            where (abs(za) .lt. 1e-5) za = 0.0
+
+            if (minval(za) .lt. 0.0 .or. maxval(za) .gt. 1.0) then
+                write(0,*) "tracer:: error: sigma axis not bounded between zero and one."
+                write(0,*) "z = ", za
+                error stop
+            end if
+
+            ! Correct the sigma values if necessary, so that
+            ! sigma==0 [base]; sigma==1 [surface]
+            if (has_srf .and. sigma_srf .eq. 0.0) za = 1.0 - za
+        end if
+
+        ! Determine whether z-axis is initially ascending or descending, then
+        ! reshape to ascending order.
+        rev = (za(1) .gt. za(size(za)))
+        call tracer_reshape1D_vec(za,z1,rev=rev)
+
+        return
+
+    end subroutine prepare_sigma_axis
+
+    function interp_vel_linear(x,y,sigma,field,xp,yp,zp,z_srf_p,H_p) result(u)
+        ! Trilinear interpolation of one velocity component onto a particle
+        ! point. sigma is that component's own sigma axis, so the cartesian
+        ! z-levels (zc) are rebuilt from it here — this is what lets ux/uy/uz be
+        ! sampled on their native staggered axes without an aa-node detour.
+
+        implicit none
+
+        real(prec), intent(IN) :: x(:), y(:), sigma(:)
+        real(prec), intent(IN) :: field(:,:,:)
+        real(prec), intent(IN) :: xp, yp, zp, z_srf_p, H_p
+        real(prec) :: u
+
+        real(prec) :: zc(size(sigma))
+        real(prec) :: xo, yo
+        type(lin3_interp_par_type) :: par
+
+        ! A staggered horizontal axis (acx/acy) is offset half a cell from the
+        ! aa nodes, so it leaves a half-cell strip at one edge uncovered. Clamp
+        ! the query point into the axis range there, giving the nearest edge
+        ! velocity rather than MV. This is a no-op for an aa axis (particles are
+        ! kept within the aa domain), so it does not change the aa path.
+        xo = min(max(xp,min(x(1),x(size(x)))),max(x(1),x(size(x))))
+        yo = min(max(yp,min(y(1),y(size(y)))),max(y(1),y(size(y))))
+
+        ! Cartesian z of the component's sigma levels at this column
+        ! (equivalent to (z_srf - depth) = z_srf - (1-sigma)*H).
+        zc  = (z_srf_p - H_p) + sigma*H_p
+        par = interp_trilinear_weights(x,y,zc,xout=xo,yout=yo,zout=zp)
+        u   = interp_trilinear(par,field)
+
+        return
+
+    end function interp_vel_linear
+
+    function interp_vel_spline(bspl,x,y,xp,yp,sig) result(u)
+        ! Evaluate a pre-built velocity spline at a particle point. x and y are
+        ! that component's horizontal axes, used only to clamp the query into
+        ! range so the acx/acy half-cell edge strip samples the nearest face
+        ! instead of evaluating outside the spline (a no-op for an aa axis).
+
+        implicit none
+
+        type(bspline_3d), intent(INOUT) :: bspl
+        real(prec),       intent(IN)    :: x(:), y(:)
+        real(prec),       intent(IN)    :: xp, yp, sig
+        real(prec) :: u
+
+        real(prec) :: xo, yo
+
+        xo = min(max(xp,min(x(1),x(size(x)))),max(x(1),x(size(x))))
+        yo = min(max(yp,min(y(1),y(size(y)))),max(y(1),y(size(y))))
+
+        u = interp_bspline3D(bspl,xo,yo,sig)
+
+        return
+
+    end function interp_vel_spline
+
+    function destagger_to_aa(x_src,y_src,field,x_aa,y_aa) result(field_aa)
+        ! Interpolate a staggered 2D field onto the aa nodes (x_aa,y_aa). Used
+        ! for the surface-velocity deposition heuristic, which needs ux and uy
+        ! co-located. Out-of-range aa nodes (the half-cell overhang at the
+        ! domain edge) clamp to the nearest source node rather than giving MV.
+        ! Identity when x_src/y_src already equal x_aa/y_aa (aa input).
+
+        implicit none
+
+        real(prec), intent(IN) :: x_src(:), y_src(:)
+        real(prec), intent(IN) :: field(:,:)
+        real(prec), intent(IN) :: x_aa(:), y_aa(:)
+        real(prec) :: field_aa(size(x_aa),size(y_aa))
+
+        integer    :: i, j
+        real(prec) :: xo, yo, xmn, xmx, ymn, ymx
+        type(lin3_interp_par_type) :: par
+
+        xmn = minval(x_src); xmx = maxval(x_src)
+        ymn = minval(y_src); ymx = maxval(y_src)
+
+        do j = 1, size(y_aa)
+        do i = 1, size(x_aa)
+            xo  = min(max(x_aa(i),xmn),xmx)
+            yo  = min(max(y_aa(j),ymn),ymx)
+            par = interp_bilinear_weights(x_src,y_src,xout=xo,yout=yo)
+            field_aa(i,j) = interp_bilinear(par,field)
+        end do
+        end do
+
+        return
+
+    end function destagger_to_aa
 
     function gen_distribution_vel(uv,H,uv_max,H_min) result(p)
 
