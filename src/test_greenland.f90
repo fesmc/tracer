@@ -16,7 +16,7 @@ program tracertest
 
     implicit none
 
-    type(tracer_class) :: trc1
+    type(tracer_class) :: trc1, trc2
     type(grid_class)   :: grd
 
     character(len=512) :: filename_nml
@@ -28,15 +28,16 @@ program tracertest
     integer, allocatable :: dims(:)
 
     real(prec), allocatable :: xc(:), yc(:), zeta(:), zeta_ac(:)
+    real(prec), allocatable :: xc_ac(:), yc_ac(:)
     real(prec), allocatable :: lon2D(:,:), lat2D(:,:)
     real(prec), allocatable :: z_srf(:,:), H_ice(:,:)
 
     ! Yelmo staggering: ux lives on the right border of H_ice(i,j) (acx nodes),
     ! uy on the top border (acy nodes), both on the zeta levels. uz lives at the
     ! cell centre horizontally but on the zeta_ac levels (layer interfaces).
-    ! tracer_update wants all three at cell centres on a single z axis.
+    ! These are passed to tracer_update on their native axes (xc_ac, yc_ac,
+    ! zeta_ac) — no host-side destaggering to aa-nodes.
     real(prec), allocatable :: ux_acx(:,:,:), uy_acy(:,:,:), uz_ac(:,:,:)
-    real(prec), allocatable :: ux(:,:,:), uy(:,:,:), uz(:,:,:)
 
     integer    :: k, nstep
     real(prec) :: time, time_start, time_end
@@ -70,7 +71,7 @@ program tracertest
     allocate(lon2D(nx,ny),lat2D(nx,ny))
     allocate(z_srf(nx,ny),H_ice(nx,ny))
     allocate(ux_acx(nx,ny,nz),uy_acy(nx,ny,nz),uz_ac(nx,ny,nz_ac))
-    allocate(ux(nx,ny,nz),uy(nx,ny,nz),uz(nx,ny,nz))
+    allocate(xc_ac(nx),yc_ac(ny))
 
     call nc_read(file_restart,"xc",xc)
     call nc_read(file_restart,"yc",yc)
@@ -80,6 +81,11 @@ program tracertest
     ! Axes are stored in km; the tracer works in m.
     xc = xc*1e3
     yc = yc*1e3
+
+    ! Staggered horizontal axes: acx nodes sit half a cell to the right of the
+    ! aa nodes, acy nodes half a cell up. tracer_update samples ux/uy there.
+    xc_ac = xc + 0.5*(xc(2)-xc(1))
+    yc_ac = yc + 0.5*(yc(2)-yc(1))
 
     ! lon/lat come from the topography file, which defines the grid. Check it is
     ! the same grid as the restart rather than trusting the file names.
@@ -99,10 +105,9 @@ program tracertest
     call nc_read(file_restart,"uz",uz_ac,    start=[1,1,1,time_index],count=[nx,ny,nz_ac,1])
 
     ! Yelmo's uz is already positive upward, so it is used as read. (The former
-    ! GRISLI forcing was positive downward and had to be negated here.)
-    call destagger_acx_to_aa(ux_acx,ux)
-    call destagger_acy_to_aa(uy_acy,uy)
-    call interp_zeta_ac_to_zeta(uz_ac,zeta_ac,zeta,uz)
+    ! GRISLI forcing was positive downward and had to be negated here.) The
+    ! velocities keep their native staggered locations; tracer_update handles
+    ! the interpolation to each particle point.
 
     ! === Run ===================================================
 
@@ -130,7 +135,9 @@ program tracertest
         ! so they are omitted and recorded as missing. lon/lat are supplied.
         call tracer_update(trc1,time=real(time,prec_time), &
                            x=xc,y=yc,z=zeta,z_srf=z_srf,H=H_ice, &
-                           ux=ux,uy=uy,uz=uz,lon=lon2D,lat=lat2D, &
+                           ux=ux_acx,uy=uy_acy,uz=uz_ac, &
+                           x_ux=xc_ac,y_uy=yc_ac,z_uz=zeta_ac, &
+                           lon=lon2D,lat=lat2D, &
                            dep_now=dep_now,stats_now=stats_now)
 
         if (write_now) then
@@ -154,7 +161,84 @@ program tracertest
 
     write(*,*) "test_greenland:: done. n_active = ", trc1%par%n_active
 
+    ! === Restart round-trip self-check =========================
+    ! Re-read the final record straight back into a fresh tracer object and
+    ! confirm the state matches the in-memory object it was written from. A
+    ! clean restart must reproduce every active tracer to within storage tol.
+    call tracer_init(trc2,filename_nml,time=real(time_end,prec_time), &
+                     x=xc,y=yc,is_sigma=.TRUE.,grid=grd)
+    call tracer_read(trc2,trim(fldr)//"/"//trim(filename),time=real(time_end,prec_time))
+    call check_restart(trc1,trc2)
+
 contains
+
+    subroutine check_restart(trc,trc_r)
+        ! Assert that a restart-read object (trc_r) matches the original (trc)
+        ! on every active tracer, to within single-precision round-trip tol.
+
+        type(tracer_class), intent(IN) :: trc, trc_r
+
+        real(prec) :: tol
+        integer    :: n_mismatch
+
+        tol = 1.0_prec        ! 1 m / 1 (m/a) — well above single-precision noise
+
+        if (count(trc_r%now%active .ne. trc%now%active) .gt. 0) then
+            write(0,*) "check_restart:: error: active mask differs after restart."
+            error stop
+        end if
+
+        n_mismatch = 0
+        call chk("x",     trc%now%x,     trc_r%now%x,     trc%now%active, tol, n_mismatch)
+        call chk("y",     trc%now%y,     trc_r%now%y,     trc%now%active, tol, n_mismatch)
+        call chk("z",     trc%now%z,     trc_r%now%z,     trc%now%active, tol, n_mismatch)
+        call chk("dpth",  trc%now%dpth,  trc_r%now%dpth,  trc%now%active, tol, n_mismatch)
+        call chk("z_srf", trc%now%z_srf, trc_r%now%z_srf, trc%now%active, tol, n_mismatch)
+        call chk("ux",    trc%now%ux,    trc_r%now%ux,    trc%now%active, tol, n_mismatch)
+        call chk("uy",    trc%now%uy,    trc_r%now%uy,    trc%now%active, tol, n_mismatch)
+        call chk("uz",    trc%now%uz,    trc_r%now%uz,    trc%now%active, tol, n_mismatch)
+        call chk("H",     trc%now%H,     trc_r%now%H,     trc%now%active, tol, n_mismatch)
+        call chk("dep_time", trc%dep%time, trc_r%dep%time, trc%now%active, tol, n_mismatch)
+        call chk("dep_z",    trc%dep%z,    trc_r%dep%z,    trc%now%active, tol, n_mismatch)
+
+        if (count(trc_r%now%id     .ne. trc%now%id     .and. trc%now%active.gt.0) .gt. 0 .or. &
+            count(trc_r%now%parent .ne. trc%now%parent .and. trc%now%active.gt.0) .gt. 0 .or. &
+            count(trc_r%now%n_cloned .ne. trc%now%n_cloned .and. trc%now%active.gt.0) .gt. 0) then
+            write(0,*) "check_restart:: error: lineage (id/parent/n_cloned) differs after restart."
+            error stop
+        end if
+
+        if (n_mismatch .gt. 0) then
+            write(0,*) "check_restart:: error: ", n_mismatch, " field(s) exceeded tol after restart."
+            error stop
+        end if
+
+        write(*,*) "test_greenland:: restart round-trip OK (", &
+                   count(trc%now%active.gt.0), "active tracers matched)."
+
+        return
+
+    end subroutine check_restart
+
+    subroutine chk(name,a,b,active,tol,n_mismatch)
+        character(len=*), intent(IN)    :: name
+        real(prec),       intent(IN)    :: a(:), b(:)
+        integer,          intent(IN)    :: active(:)
+        real(prec),       intent(IN)    :: tol
+        integer,          intent(INOUT) :: n_mismatch
+
+        real(prec) :: dmax
+
+        dmax = 0.0
+        if (any(active.gt.0)) dmax = maxval(abs(a-b),mask=active.gt.0)
+        if (dmax .gt. tol) then
+            write(0,"(a,a,a,g14.6)") " check_restart:: ", trim(name), " max|diff| = ", dmax
+            n_mismatch = n_mismatch + 1
+        end if
+
+        return
+
+    end subroutine chk
 
     subroutine check_same_grid(filename,xc_ref,yc_ref)
         ! The topography and restart files must describe the same grid, since
@@ -185,81 +269,5 @@ contains
         return
 
     end subroutine check_same_grid
-
-    subroutine destagger_acx_to_aa(var_acx,var_aa)
-        ! var_acx(i,j) sits on the right border of cell (i,j). The cell-centred
-        ! value is the mean of the two bordering faces; at i=1 only the right
-        ! face exists.
-
-        implicit none
-
-        real(prec), intent(IN)  :: var_acx(:,:,:)
-        real(prec), intent(OUT) :: var_aa(:,:,:)
-
-        integer :: i
-
-        var_aa(1,:,:) = var_acx(1,:,:)
-
-        do i = 2, size(var_acx,1)
-            var_aa(i,:,:) = 0.5*(var_acx(i-1,:,:) + var_acx(i,:,:))
-        end do
-
-        return
-
-    end subroutine destagger_acx_to_aa
-
-    subroutine destagger_acy_to_aa(var_acy,var_aa)
-        ! var_acy(i,j) sits on the top border of cell (i,j).
-
-        implicit none
-
-        real(prec), intent(IN)  :: var_acy(:,:,:)
-        real(prec), intent(OUT) :: var_aa(:,:,:)
-
-        integer :: j
-
-        var_aa(:,1,:) = var_acy(:,1,:)
-
-        do j = 2, size(var_acy,2)
-            var_aa(:,j,:) = 0.5*(var_acy(:,j-1,:) + var_acy(:,j,:))
-        end do
-
-        return
-
-    end subroutine destagger_acy_to_aa
-
-    subroutine interp_zeta_ac_to_zeta(var_ac,z_ac,z,var)
-        ! Linearly interpolate a field defined on the zeta_ac levels (layer
-        ! interfaces) onto the zeta levels. Both axes are ascending and share
-        ! their endpoints (0 = base, 1 = surface).
-
-        implicit none
-
-        real(prec), intent(IN)  :: var_ac(:,:,:)
-        real(prec), intent(IN)  :: z_ac(:), z(:)
-        real(prec), intent(OUT) :: var(:,:,:)
-
-        integer    :: k, k_ac, n_ac
-        real(prec) :: wt
-
-        n_ac = size(z_ac)
-
-        do k = 1, size(z)
-
-            ! Bracket z(k) in z_ac: z_ac(k_ac) <= z(k) <= z_ac(k_ac+1)
-            k_ac = 1
-            do while (k_ac .lt. n_ac-1 .and. z_ac(k_ac+1) .lt. z(k))
-                k_ac = k_ac + 1
-            end do
-
-            wt = (z(k) - z_ac(k_ac)) / (z_ac(k_ac+1) - z_ac(k_ac))
-
-            var(:,:,k) = (1.0-wt)*var_ac(:,:,k_ac) + wt*var_ac(:,:,k_ac+1)
-
-        end do
-
-        return
-
-    end subroutine interp_zeta_ac_to_zeta
 
 end program tracertest

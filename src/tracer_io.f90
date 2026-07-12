@@ -119,6 +119,12 @@ contains
         call nc_write(path_out,"parent",trc%now%parent,dim1="pt",dim2="time", missing_value=int(mv_wrt), &
                         start=[1,nt],count=[trc%par%n ,1])
 
+        ! Clones already spawned from this tracer. Written so a restart can
+        ! restore clone eligibility exactly (an already-cloned tracer must not
+        ! clone again); see tracer_read.
+        call nc_write(path_out,"n_cloned",trc%now%n_cloned,dim1="pt",dim2="time", missing_value=int(mv_wrt), &
+                        start=[1,nt],count=[trc%par%n ,1])
+
         tmp = mv_wrt
         where(trc%dep%time .ne. mv_wrt) tmp = time-trc%dep%time
         call nc_write(path_out,"age",tmp,dim1="pt",dim2="time", missing_value=mv_wrt, &
@@ -162,20 +168,138 @@ contains
 
     end subroutine tracer_write
     
-    subroutine tracer_read(trc,filename,time)
+    subroutine tracer_read(trc,filename,time,is2D)
+        ! Restart read: restore the tracer state from a tracer archive (as
+        ! written by tracer_write) at the record matching `time`. Mirrors
+        ! tracer_write field for field.
+        !
+        ! The caller must have run tracer_init first: parameters and the array
+        ! allocation come from the namelist, not the archive. This routine only
+        ! overlays the saved state, hence INTENT(INOUT).
+        !
+        ! Everything that affects the continued trajectory is restored from the
+        ! archive: positions, velocities, H/T/thk, lineage (id, parent,
+        ! n_cloned) and the full deposition record. The remaining state is
+        ! reconstructed rather than stored, because it is either derivable or
+        ! recomputed before its next use:
+        !   active   <- 2 where id /= MV, else 0 (a completed step leaves no 1s)
+        !   ax/ay/az <- 0  (recomputed at the top of the next tracer_update,
+        !                   from the restored velocities, before calc_position)
+        !   sigma    <- MV (vestigial; never read)
+        !   id_max   <- max stored id;  n_active <- count(active > 0)
+        ! A restarted run therefore reproduces an uninterrupted one to within
+        ! the archive's storage precision (single precision here, so exact bar
+        ! the km<->m rounding on x/y).
 
-        implicit none 
+        implicit none
 
-        type(tracer_class), intent(OUT) :: trc
-        character(len=*),   intent(IN)  :: filename 
-        real(prec_time),    intent(IN)  :: time 
+        type(tracer_class), intent(INOUT) :: trc
+        character(len=*),   intent(IN)    :: filename
+        real(prec_time),    intent(IN)    :: time
+        logical, intent(IN), optional     :: is2D
 
-        ! Local variables 
-        integer :: i, k 
+        ! Local variables
+        integer :: n, nt, nt_tot, mvi
+        integer, allocatable :: dims(:)
+        real(prec_wrt), allocatable :: time_all(:)
+        logical :: is_2D
 
+        is_2D = .FALSE.
+        if (present(is2D)) is_2D = is2D
 
+        mvi = int(MV)
 
-        return 
+        ! The archive must describe the same number of tracers as this object
+        call nc_dims(filename,"pt",dims=dims)
+        n = dims(1)
+        if (n .ne. trc%par%n) then
+            write(0,*) "tracer_read:: error: archive pt size /= trc%par%n: ", n, trc%par%n
+            error stop
+        end if
+
+        ! Locate the record whose stored time matches the requested restart time
+        call nc_dims(filename,"time",dims=dims)
+        nt_tot = dims(1)
+        allocate(time_all(nt_tot))
+        call nc_read(filename,"time",time_all,start=[1],count=[nt_tot])
+
+        nt = minloc(abs(time_all-real(time,prec_wrt)),dim=1)
+        if (abs(time_all(nt)-real(time,prec_wrt)) .gt. 1e-2) then
+            write(0,*) "tracer_read:: error: time not found in "//trim(filename)//": ", time
+            error stop
+        end if
+
+        ! --- Restore now-state (mirror of tracer_write) ---
+        call nc_read(filename,"x",trc%now%x,start=[1,nt],count=[n,1])
+        where (trc%now%x .ne. MV) trc%now%x = trc%now%x*1e3        ! km -> m
+        if (.not. is_2D) then
+            call nc_read(filename,"y",trc%now%y,start=[1,nt],count=[n,1])
+            where (trc%now%y .ne. MV) trc%now%y = trc%now%y*1e3    ! km -> m
+        end if
+        call nc_read(filename,"z",     trc%now%z,     start=[1,nt],count=[n,1])
+        call nc_read(filename,"dpth",  trc%now%dpth,  start=[1,nt],count=[n,1])
+        call nc_read(filename,"z_srf", trc%now%z_srf, start=[1,nt],count=[n,1])
+        call nc_read(filename,"ux",    trc%now%ux,    start=[1,nt],count=[n,1])
+        call nc_read(filename,"uy",    trc%now%uy,    start=[1,nt],count=[n,1])
+        call nc_read(filename,"uz",    trc%now%uz,    start=[1,nt],count=[n,1])
+        call nc_read(filename,"thk",   trc%now%thk,   start=[1,nt],count=[n,1])
+        call nc_read(filename,"T",     trc%now%T,     start=[1,nt],count=[n,1])
+        call nc_read(filename,"H",     trc%now%H,     start=[1,nt],count=[n,1])
+        call nc_read(filename,"id",       trc%now%id,       start=[1,nt],count=[n,1])
+        call nc_read(filename,"parent",   trc%now%parent,   start=[1,nt],count=[n,1])
+        call nc_read(filename,"n_cloned", trc%now%n_cloned, start=[1,nt],count=[n,1])
+
+        ! --- Restore deposition record ---
+        call nc_read(filename,"dep_time", trc%dep%time, start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_H",    trc%dep%H,    start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_x",    trc%dep%x,    start=[1,nt],count=[n,1])
+        where (trc%dep%x .ne. MV) trc%dep%x = trc%dep%x*1e3        ! km -> m
+        if (.not. is_2D) then
+            call nc_read(filename,"dep_y",trc%dep%y,    start=[1,nt],count=[n,1])
+            where (trc%dep%y .ne. MV) trc%dep%y = trc%dep%y*1e3    ! km -> m
+        end if
+        call nc_read(filename,"dep_z",    trc%dep%z,    start=[1,nt],count=[n,1])
+        if (.not. is_2D) then
+            call nc_read(filename,"dep_lon", trc%dep%lon, start=[1,nt],count=[n,1])
+            call nc_read(filename,"dep_lat", trc%dep%lat, start=[1,nt],count=[n,1])
+        end if
+        call nc_read(filename,"dep_t2m_ann",  trc%dep%t2m_ann,  start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_pr_ann",   trc%dep%pr_ann,   start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_d18O_ann", trc%dep%d18O_ann, start=[1,nt],count=[n,1])
+
+        ! --- Reconstruct the state the archive does not carry ---
+        where (trc%now%id .ne. mvi)
+            trc%now%active = 2
+        elsewhere
+            trc%now%active = 0
+        end where
+
+        trc%now%sigma = MV
+        trc%now%ax    = 0.0
+        trc%now%ay    = 0.0
+        trc%now%az    = 0.0
+
+        ! Deposition tags the archive does not store (never written; they do not
+        ! affect advection). Set missing for a consistent record.
+        trc%dep%t2m_sum   = MV
+        trc%dep%pr_sum    = MV
+        trc%dep%t2m_prann = MV
+
+        ! Bookkeeping so newly deposited tracers get fresh ids and n_active is
+        ! consistent with the restored active mask.
+        trc%par%id_max = 0
+        if (any(trc%now%id .ne. mvi)) trc%par%id_max = maxval(trc%now%id,mask=trc%now%id.ne.mvi)
+        trc%par%n_active = count(trc%now%active .gt. 0)
+
+        ! The clock resumes at the restart time; dt/time_old are set on the next
+        ! tracer_update, time_dep/time_write are vestigial.
+        trc%now%time       = time
+        trc%now%time_old   = time
+        trc%now%time_dep   = time
+        trc%now%time_write = time
+        trc%now%dt         = 0.0
+
+        return
 
     end subroutine tracer_read
 
