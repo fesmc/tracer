@@ -59,7 +59,7 @@ module tracer3D
         logical            :: stats
         real(prec_time)    :: dt_write_stats
         integer            :: n_depth
-        real(prec_wrt), allocatable :: age_iso(:)
+        real(prec_wrt), allocatable :: time_iso(:)
         real(prec_wrt)     :: dt_iso
 
     end type
@@ -140,7 +140,7 @@ module tracer3D
 
 contains 
 
-    subroutine tracer_init(trc,filename,time,x,y,is_sigma,grid)
+    subroutine tracer_init(trc,filename,time,x,y,is_sigma,grid,time_iso)
 
         implicit none
 
@@ -153,6 +153,11 @@ contains
         ! namelist sets stats = .TRUE., and even then optional (x/y is the
         ! fallback). Supplied by the host model (e.g. Yelmo owns the grid).
         type(grid_class), intent(IN), optional :: grid
+        ! Isochrone deposition-time targets [ka] for the gridded stats. When the
+        ! host owns the isochrone axis (e.g. Yelmo's ytrc), it passes them here
+        ! and they take precedence over the namelist time_iso, so the two never
+        ! need to be kept in sync. Passed in wp (matching x/y); stored as prec_wrt.
+        real(wp), intent(IN), optional :: time_iso(:)
 
         ! Load the parameters
         call tracer_par_load(trc%par,filename,is_sigma)
@@ -166,11 +171,23 @@ contains
         call tracer_allocate(trc%now,trc%dep,n=trc%par%n)
 
         ! Gridded statistics are opt-in (namelist stats flag). depth_norm is
-        ! n_depth uniform levels; age_iso, dt_iso, dt_write_stats come from par.
+        ! n_depth uniform levels; dt_iso, dt_write_stats come from par. The
+        ! isochrone targets come from the host (time_iso argument) when present,
+        ! otherwise from the namelist (par%time_iso).
         if (trc%par%stats) then
+            if (present(time_iso)) then
+                if (allocated(trc%par%time_iso)) deallocate(trc%par%time_iso)
+                allocate(trc%par%time_iso(size(time_iso)))
+                trc%par%time_iso = real(time_iso, prec_wrt)
+            end if
+            if (.not. allocated(trc%par%time_iso)) then
+                write(*,*) "tracer_init:: Error: stats=.TRUE. requires isochrone targets, &
+                           &either via the namelist time_iso or the time_iso argument."
+                stop "Program stopped."
+            end if
             call tracer_stats_init(trc%stats,x,y, &
                                    depth_norm=uniform_depth(trc%par%n_depth), &
-                                   age_iso=trc%par%age_iso, dt_iso=trc%par%dt_iso, &
+                                   time_iso=trc%par%time_iso, dt_iso=trc%par%dt_iso, &
                                    grid=grid)
         end if
 
@@ -611,7 +628,7 @@ contains
         ! allocated when par%stats; calc_tracer_stats (tracer_stats) takes the
         ! tracer state as plain arrays, so this module does not depend on it.
         if (trc%par%stats .and. stats_now) then
-            call calc_tracer_stats(trc%stats, time, trc%now%active, &
+            call calc_tracer_stats(trc%stats, trc%now%active, &
                                    trc%now%x, trc%now%y, trc%now%dpth, trc%now%H, &
                                    trc%dep%time, trc%dep%z, trc%dep%lon, trc%dep%lat, &
                                    trc%dep%t2m_ann, trc%dep%pr_ann, trc%dep%d18O_ann)
@@ -1303,7 +1320,7 @@ contains
         logical, intent(IN) :: is_sigma 
 
         ! Local variables
-        integer :: n_age_iso
+        integer :: n_time_iso
 
         call nml_read(filename,"trc","dt",            par%dt)
         call nml_read(filename,"trc","n",             par%n)
@@ -1345,10 +1362,10 @@ contains
             call nml_read(filename,"trc","dt_write_stats", par%dt_write_stats)
             call nml_read(filename,"trc","n_depth",        par%n_depth)
             call nml_read(filename,"trc","dt_iso",         par%dt_iso)
-            call nml_read(filename,"trc","n_age_iso",      n_age_iso)
-            if (allocated(par%age_iso)) deallocate(par%age_iso)
-            allocate(par%age_iso(n_age_iso))
-            call nml_read(filename,"trc","age_iso",        par%age_iso)
+            call nml_read(filename,"trc","n_time_iso",     n_time_iso)
+            if (allocated(par%time_iso)) deallocate(par%time_iso)
+            allocate(par%time_iso(n_time_iso))
+            call nml_read(filename,"trc","time_iso",       par%time_iso)
         end if
 
         ! Define additional parameter values

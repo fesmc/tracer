@@ -9,7 +9,7 @@ module tracer_stats
     !       check that a coupled run is behaving.
     !
     !   present-day product (tracer_write_product) -- one snapshot, at t = 0 ka BP.
-    !       Adds the isochrone block (depth of each age_iso layer) and full grid
+    !       Adds the isochrone block (depth of each time_iso layer) and full grid
     !       metadata, so it is a drop-in comparison for a radiostratigraphy
     !       dataset such as MacGregor et al. (2015).
     !
@@ -54,7 +54,7 @@ module tracer_stats
         ! Axes
         real(prec_wrt), allocatable :: x(:), y(:)         ! grid axes [m]
         real(prec_wrt), allocatable :: depth_norm(:)      ! normalized depth [1]
-        real(prec_wrt), allocatable :: age_iso(:)         ! isochrone ages [ka]
+        real(prec_wrt), allocatable :: time_iso(:)        ! isochrone deposition times [ka]
         real(prec_wrt) :: dt_iso                          ! isochrone half-width [ka]
 
         ! Grid metadata for the output files (from the host model, e.g. Yelmo).
@@ -64,8 +64,6 @@ module tracer_stats
         ! Depth-layer block (nx, ny, ndepth)
         integer,        allocatable :: count(:,:,:)       ! tracers in band (0 if none)
         type(stat_field_class)      :: fld(N_TAG)
-        real(prec_wrt), allocatable :: ice_age(:,:,:)     ! = time - dep_time [ka]
-        real(prec_wrt), allocatable :: ice_age_sd(:,:,:)
 
         ! Isochrone block (nx, ny, niso)
         integer,        allocatable :: count_iso(:,:,:)
@@ -81,9 +79,9 @@ module tracer_stats
 
 contains
 
-    subroutine tracer_stats_init(st, x, y, depth_norm, age_iso, dt_iso, grid)
+    subroutine tracer_stats_init(st, x, y, depth_norm, time_iso, dt_iso, grid)
         ! Allocate the gridded-stats object on the (x, y) grid, with the given
-        ! depth and isochrone-age axes. grid, if present, supplies the projection
+        ! depth and isochrone deposition-time axes. grid, if present, supplies the projection
         ! metadata (lon/lat/area/crs) written into the output files; without it
         ! the files carry bare xc/yc axes.
 
@@ -91,7 +89,7 @@ contains
 
         type(tracer_stats_class), intent(INOUT) :: st
         real(wp),       intent(IN) :: x(:), y(:)
-        real(prec_wrt),   intent(IN) :: depth_norm(:), age_iso(:)
+        real(prec_wrt),   intent(IN) :: depth_norm(:), time_iso(:)
         real(prec_wrt),   intent(IN) :: dt_iso
         type(grid_class), intent(IN), optional :: grid
 
@@ -100,21 +98,20 @@ contains
         call tracer_stats_end(st)
 
         nx = size(x); ny = size(y)
-        ndepth = size(depth_norm); niso = size(age_iso)
+        ndepth = size(depth_norm); niso = size(time_iso)
 
         allocate(st%x(nx), st%y(ny))
         st%x = real(x, prec_wrt)
         st%y = real(y, prec_wrt)
 
         allocate(st%depth_norm(ndepth)); st%depth_norm = depth_norm
-        allocate(st%age_iso(niso));      st%age_iso    = age_iso
+        allocate(st%time_iso(niso));     st%time_iso   = time_iso
         st%dt_iso = dt_iso
 
         st%has_grid = present(grid)
         if (present(grid)) st%grid = grid
 
         allocate(st%count(nx,ny,ndepth))
-        allocate(st%ice_age(nx,ny,ndepth), st%ice_age_sd(nx,ny,ndepth))
         do f = 1, N_TAG
             allocate(st%fld(f)%mean(nx,ny,ndepth), st%fld(f)%sd(nx,ny,ndepth))
         end do
@@ -166,10 +163,8 @@ contains
         if (allocated(st%x))            deallocate(st%x)
         if (allocated(st%y))            deallocate(st%y)
         if (allocated(st%depth_norm))   deallocate(st%depth_norm)
-        if (allocated(st%age_iso))      deallocate(st%age_iso)
+        if (allocated(st%time_iso))     deallocate(st%time_iso)
         if (allocated(st%count))        deallocate(st%count)
-        if (allocated(st%ice_age))      deallocate(st%ice_age)
-        if (allocated(st%ice_age_sd))   deallocate(st%ice_age_sd)
         do f = 1, N_TAG
             if (allocated(st%fld(f)%mean)) deallocate(st%fld(f)%mean)
             if (allocated(st%fld(f)%sd))   deallocate(st%fld(f)%sd)
@@ -185,22 +180,19 @@ contains
 
     end subroutine tracer_stats_end
 
-    subroutine calc_tracer_stats(st, time, active, px, py, dpth, H, &
+    subroutine calc_tracer_stats(st, active, px, py, dpth, H, &
                                  dep_time, dep_z, dep_lon, dep_lat, &
                                  dep_t2m_ann, dep_pr_ann, dep_d18O_ann)
         ! One pass over the tracers, binning them by grid cell and either
-        ! normalized depth (the depth-layer block) or age (the isochrone block),
-        ! and accumulating the mean/sd of each field. Only deposited tracers
-        ! (active == 2) count. A tag equal to MV is skipped, so a field a run
-        ! does not carry comes out all-missing rather than polluting the mean.
-        !
-        ! `time` is the model time [years] at which the snapshot is taken; ages
-        ! are formed as time - dep_time. All arrays are indexed by tracer slot.
+        ! normalized depth (the depth-layer block) or deposition time (the
+        ! isochrone block), and accumulating the mean/sd of each field. Only
+        ! deposited tracers (active == 2) count. A tag equal to MV is skipped, so
+        ! a field a run does not carry comes out all-missing rather than polluting
+        ! the mean. All arrays are indexed by tracer slot.
 
         implicit none
 
         type(tracer_stats_class), intent(INOUT) :: st
-        real(prec_time), intent(IN) :: time
         integer,    intent(IN) :: active(:)
         real(wp), intent(IN) :: px(:), py(:), dpth(:), H(:)
         real(wp), intent(IN) :: dep_time(:), dep_z(:), dep_lon(:), dep_lat(:)
@@ -209,7 +201,7 @@ contains
         integer :: nx, ny, ndepth, niso
         integer :: p, i, j, q, qi, f
         real(prec_wrt) :: sig
-        real(dp) :: time_ka, age_ka, v
+        real(dp) :: dep_time_ka, v
         real(wp) :: vals(N_TAG)
 
         ! Double-precision accumulators (freed on return)
@@ -218,7 +210,7 @@ contains
         real(dp), allocatable :: iso_dsum(:,:,:), iso_dsq(:,:,:), iso_zsum(:,:,:)
 
         nx = size(st%x); ny = size(st%y)
-        ndepth = size(st%depth_norm); niso = size(st%age_iso)
+        ndepth = size(st%depth_norm); niso = size(st%time_iso)
 
         allocate(acc_sum(nx,ny,ndepth,N_TAG), acc_sq(nx,ny,ndepth,N_TAG))
         allocate(fcount(nx,ny,ndepth,N_TAG))
@@ -228,8 +220,6 @@ contains
         st%count_iso = 0
         acc_sum = 0.0_dp; acc_sq = 0.0_dp; fcount = 0
         iso_dsum = 0.0_dp; iso_dsq = 0.0_dp; iso_zsum = 0.0_dp
-
-        time_ka = real(time, dp)*1e-3_dp
 
         do p = 1, size(active)
 
@@ -264,11 +254,11 @@ contains
                 end do
             end if
 
-            ! -- isochrone binning (age within dt_iso of a target; may match none)
+            ! -- isochrone binning (deposition time within dt_iso of a target; may match none)
             if (dep_time(p) .ne. MV) then
-                age_ka = time_ka - real(dep_time(p), dp)*1e-3_dp
+                dep_time_ka = real(dep_time(p), dp)*1e-3_dp
                 do qi = 1, niso
-                    if (abs(age_ka - real(st%age_iso(qi), dp)) .le. real(st%dt_iso, dp)) then
+                    if (abs(dep_time_ka - real(st%time_iso(qi), dp)) .le. real(st%dt_iso, dp)) then
                         st%count_iso(i,j,qi) = st%count_iso(i,j,qi) + 1
                         iso_dsum(i,j,qi) = iso_dsum(i,j,qi) + real(dpth(p), dp)
                         iso_dsq(i,j,qi)  = iso_dsq(i,j,qi)  + real(dpth(p), dp)**2
@@ -284,15 +274,6 @@ contains
             call finalize_meansd(fcount(:,:,:,f), acc_sum(:,:,:,f), acc_sq(:,:,:,f), &
                                  st%fld(f)%mean, st%fld(f)%sd)
         end do
-
-        ! ice_age = time - dep_time, so its mean/sd follow from the dep_time field
-        where (st%fld(F_DEPTIME)%mean .ne. MV)
-            st%ice_age    = real(time_ka, prec_wrt) - st%fld(F_DEPTIME)%mean
-            st%ice_age_sd = st%fld(F_DEPTIME)%sd
-        elsewhere
-            st%ice_age    = MV
-            st%ice_age_sd = MV
-        end where
 
         ! -- finalize isochrone block
         call finalize_meansd(st%count_iso, iso_dsum, iso_dsq, st%depth_iso, st%depth_iso_sd)
@@ -461,8 +442,6 @@ contains
                              trim(st%fld(f)%units), trim(st%fld(f)%long_name)//" (sd)", nx, ny, nd, nt)
         end do
 
-        call write_layer(path, "ice_age",    st%ice_age,    "ka", "Ice age (time - dep_time)", nx, ny, nd, nt)
-        call write_layer(path, "ice_age_sd", st%ice_age_sd, "ka", "Ice age (sd)",              nx, ny, nd, nt)
 
         return
 
@@ -497,7 +476,7 @@ contains
 
         call create_grid(st, path)
         call nc_write_dim(path, "depth_norm", x=st%depth_norm, units="1")
-        call nc_write_dim(path, "age_iso",    x=st%age_iso,    units="ka")
+        call nc_write_dim(path, "time_iso",   x=st%time_iso,   units="ka")
 
         ! -- depth-layer block
         call nc_write(path, "count", st%count, dim1="xc", dim2="yc", dim3="depth_norm", &
@@ -510,19 +489,14 @@ contains
                           dim1="xc", dim2="yc", dim3="depth_norm", missing_value=real(MV,prec_wrt), &
                           units=trim(st%fld(f)%units), long_name=trim(st%fld(f)%long_name)//" (sd)")
         end do
-        call nc_write(path, "ice_age", st%ice_age, dim1="xc", dim2="yc", dim3="depth_norm", &
-                      missing_value=real(MV,prec_wrt), units="ka", long_name="Ice age (time - dep_time)")
-        call nc_write(path, "ice_age_err", st%ice_age_sd, dim1="xc", dim2="yc", dim3="depth_norm", &
-                      missing_value=real(MV,prec_wrt), units="ka", long_name="Ice age (sd)")
-
         ! -- isochrone block
-        call nc_write(path, "depth_iso", st%depth_iso, dim1="xc", dim2="yc", dim3="age_iso", &
+        call nc_write(path, "depth_iso", st%depth_iso, dim1="xc", dim2="yc", dim3="time_iso", &
                       missing_value=real(MV,prec_wrt), units="m", long_name="Isochrone depth")
-        call nc_write(path, "depth_iso_err", st%depth_iso_sd, dim1="xc", dim2="yc", dim3="age_iso", &
+        call nc_write(path, "depth_iso_err", st%depth_iso_sd, dim1="xc", dim2="yc", dim3="time_iso", &
                       missing_value=real(MV,prec_wrt), units="m", long_name="Isochrone depth (sd)")
-        call nc_write(path, "dep_z_iso", st%dep_z_iso, dim1="xc", dim2="yc", dim3="age_iso", &
+        call nc_write(path, "dep_z_iso", st%dep_z_iso, dim1="xc", dim2="yc", dim3="time_iso", &
                       missing_value=real(MV,prec_wrt), units="m", long_name="Isochrone deposition elevation")
-        call nc_write(path, "count_iso", st%count_iso, dim1="xc", dim2="yc", dim3="age_iso", &
+        call nc_write(path, "count_iso", st%count_iso, dim1="xc", dim2="yc", dim3="time_iso", &
                       missing_value=int(MV), long_name="Tracer count (isochrones)")
 
         if (present(H_ice)) &

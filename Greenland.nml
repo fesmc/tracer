@@ -25,8 +25,8 @@
     stats          = True
     dt_write_stats = 2000.0     ! [a] cadence of the transient monitor file
     n_depth        = 25         ! normalized-depth levels (uniform, 0..1)
-    n_age_iso      = 4
-    age_iso        = 11.7, 29.0, 57.0, 115.0   ! [ka] isochrone target ages
+    n_time_iso     = 4
+    time_iso       = -11.7, -29.0, -57.0, -115.0   ! [ka] isochrone deposition-time targets
     dt_iso         = 5.0        ! [ka] isochrone half-width
 
     ! Particle cloning (opt-in): spawn offset copies of deep, slow, aged tracers

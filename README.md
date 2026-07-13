@@ -99,7 +99,7 @@ domain; the file names themselves are bare.
 |---|---|
 | `tracer.nc` | every tracer slot over time — position, velocity, `id`, `age`, deposition tags |
 | `tracer-stats.nc` | gridded monitor, appended over time: per `(x, y, depth_norm)` the surviving tracer `count` and the mean/sd of each deposition tag. A quick ncview check that a run behaves. |
-| `tracer-pd.nc` | present-day product (t = 0): adds the isochrone block (`depth_iso` at each `age_iso`) and full grid metadata, a drop-in comparison for a radiostratigraphy dataset such as `GRL-16KM_STRAT-M15.nc`. |
+| `tracer-pd.nc` | present-day product (t = 0): adds the isochrone block (`depth_iso` at each `time_iso`) and full grid metadata, a drop-in comparison for a radiostratigraphy dataset such as `GRL-16KM_STRAT-M15.nc`. |
 
 The gridded statistics are opt-in (`stats = .TRUE.`) and driver-supplied a
 projected grid for the metadata; see `&trc` below and `src/tracer_stats.f90`.
@@ -151,7 +151,7 @@ that does not want them omits them entirely:
 |---|---|
 | `dt_write_stats` | cadence of the transient monitor file [a] |
 | `n_depth` | number of normalized-depth levels (uniform over 0–1) |
-| `age_iso`, `n_age_iso` | isochrone target ages [ka] and their count |
+| `time_iso`, `n_time_iso` | isochrone deposition-time targets [ka] and their count |
 | `dt_iso` | isochrone half-width [ka] |
 
 `weight` ranks cells rather than being sampled from: each deposition step takes
