@@ -1,0 +1,51 @@
+! tracer_defaults.nml
+!
+! Default values (the schema) for the tracer &trc namelist group. Every &trc
+! parameter must appear here. A run's own namelist need only list the entries
+! it overrides; anything omitted falls back to the value below. nml_validate
+! flags any user parameter that is not declared here (catches typos).
+!
+! Read by tracer_par_load via nml_read(..., defaults_file="input/tracer_defaults.nml",
+! defaults_group="trc"). Keep a synchronized copy in any host's input/ directory
+! (e.g. yelmo/input/) so it is found at run time.
+
+&trc
+    ! Core particle pool / cadence
+    dt        = 10.0            ! [yr] tracer internal timestep
+    n         = 5000            ! number of particle slots
+    n_max_dep = 100             ! max particles deposited per deposition event
+    dt_dep    = 500.0           ! [yr] deposition cadence
+    dt_write  = 1000.0          ! [yr] native archive write cadence
+
+    ! Deposition / advection limits
+    H_min     = 1000.0          ! [m]   min ice thickness for a live tracer
+    depth_max = 0.99            ! fraction of thickness
+    U_max     = 200.0           ! [m/a] max horizontal speed for a live tracer
+    U_max_dep =  40.0           ! [m/a] max speed at deposition
+    H_min_dep = 1000.0          ! [m]   min thickness at deposition
+    alpha     = 1.0             ! only used by weight = linear|quadratic
+    weight    = "vel"           ! "vel", "linear", "quadratic", "rand"
+    noise     = True
+    seed      = 42              ! RNG seed; <= 0 for a nondeterministic run
+
+    interp_method = "linear"    ! "linear" or "spline"
+    par_trans_file = "None"
+
+    ! Particle cloning (opt-in)
+    clone            = False
+    n_clones         = 3
+    clone_depth_frac = 0.5
+    clone_U_max      = 20.0
+    clone_dep_time_min = -130000.0
+    clone_dep_time_max = -115000.0
+    clone_offset_xy  = 5000.0
+    clone_offset_z   = 50.0
+
+    ! Gridded (Eulerian) statistics (opt-in)
+    stats          = False
+    dt_write_stats = 2000.0     ! [yr] stats file cadence (unused when a host drives compute-on-write)
+    n_depth        = 25         ! normalized-depth levels (uniform, 0..1)
+    dt_iso         = 5.0        ! [ka] isochrone half-width
+    n_time_iso     = 4          ! number of isochrone targets
+    time_iso       = -11.7, -29.0, -57.0, -115.0   ! [ka] isochrone deposition-time targets (host may override)
+/

@@ -1322,51 +1322,52 @@ contains
         ! Local variables
         integer :: n_time_iso
 
-        call nml_read(filename,"trc","dt",            par%dt)
-        call nml_read(filename,"trc","n",             par%n)
-        call nml_read(filename,"trc","n_max_dep",     par%n_max_dep)
-        call nml_read(filename,"trc","dt_dep",        par%dt_dep)
-        call nml_read(filename,"trc","dt_write",      par%dt_write)
-        call nml_read(filename,"trc","H_min",         par%H_min)
-        call nml_read(filename,"trc","depth_max",     par%depth_max)
-        call nml_read(filename,"trc","U_max",         par%U_max)
-        call nml_read(filename,"trc","U_max_dep",     par%U_max_dep)
-        call nml_read(filename,"trc","H_min_dep",     par%H_min_dep)
-        call nml_read(filename,"trc","alpha",         par%alpha)
-        call nml_read(filename,"trc","weight",        par%weight)
-        call nml_read(filename,"trc","noise",         par%noise)
-        call nml_read(filename,"trc","seed",          par%seed)
-        call nml_read(filename,"trc","interp_method", par%interp_method)
-        call nml_read(filename,"trc","par_trans_file",par%par_trans_file)
+        ! Defaults file (schema). Every &trc parameter has a default here, so a
+        ! run's own namelist need only list overrides; keep a synced copy in the
+        ! host's input/ dir (e.g. yelmo/input/). See input/tracer_defaults.nml.
+        character(len=*), parameter :: def_file  = "input/tracer_defaults.nml"
+        character(len=*), parameter :: def_group = "trc"
 
-        ! Cloning is opt-in. Its knobs are read only when enabled, so a run that
-        ! does not clone need not carry the extra namelist entries.
-        call nml_read(filename,"trc","clone",         par%clone)
-        if (par%clone) then
-            call nml_read(filename,"trc","n_clones",           par%n_clones)
-            call nml_read(filename,"trc","clone_depth_frac",   par%clone_depth_frac)
-            call nml_read(filename,"trc","clone_U_max",        par%clone_U_max)
-            call nml_read(filename,"trc","clone_dep_time_min", par%clone_dep_time_min)
-            call nml_read(filename,"trc","clone_dep_time_max", par%clone_dep_time_max)
-            call nml_read(filename,"trc","clone_offset_xy",    par%clone_offset_xy)
-            call nml_read(filename,"trc","clone_offset_z",     par%clone_offset_z)
-        else
-            par%n_clones = 0
-        end if
+        ! Reject any user parameter that is not in the schema (catches typos)
+        call nml_validate(filename,def_file,"trc",defaults_group=def_group)
 
-        ! Gridded statistics are opt-in. Their parameters are read only when the
-        ! stats flag is set, so a run that does not want them (e.g. the RH2003
-        ! profile) need not carry the extra namelist entries.
-        call nml_read(filename,"trc","stats",         par%stats)
-        if (par%stats) then
-            call nml_read(filename,"trc","dt_write_stats", par%dt_write_stats)
-            call nml_read(filename,"trc","n_depth",        par%n_depth)
-            call nml_read(filename,"trc","dt_iso",         par%dt_iso)
-            call nml_read(filename,"trc","n_time_iso",     n_time_iso)
-            if (allocated(par%time_iso)) deallocate(par%time_iso)
-            allocate(par%time_iso(n_time_iso))
-            call nml_read(filename,"trc","time_iso",       par%time_iso)
-        end if
+        call nml_read(filename,"trc","dt",            par%dt,            init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","n",             par%n,             init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","n_max_dep",     par%n_max_dep,     init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","dt_dep",        par%dt_dep,        init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","dt_write",      par%dt_write,      init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","H_min",         par%H_min,         init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","depth_max",     par%depth_max,     init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","U_max",         par%U_max,         init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","U_max_dep",     par%U_max_dep,     init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","H_min_dep",     par%H_min_dep,     init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","alpha",         par%alpha,         init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","weight",        par%weight,        init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","noise",         par%noise,         init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","seed",          par%seed,          init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","interp_method", par%interp_method, init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","par_trans_file",par%par_trans_file,init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+
+        ! Cloning (opt-in via clone flag; all knobs come from defaults otherwise)
+        call nml_read(filename,"trc","clone",             par%clone,             init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","n_clones",          par%n_clones,          init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","clone_depth_frac",  par%clone_depth_frac,  init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","clone_U_max",       par%clone_U_max,       init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","clone_dep_time_min",par%clone_dep_time_min,init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","clone_dep_time_max",par%clone_dep_time_max,init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","clone_offset_xy",   par%clone_offset_xy,   init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","clone_offset_z",    par%clone_offset_z,    init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        if (.not. par%clone) par%n_clones = 0
+
+        ! Gridded (Eulerian) statistics (opt-in via stats flag; knobs from defaults)
+        call nml_read(filename,"trc","stats",         par%stats,         init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","dt_write_stats",par%dt_write_stats,init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","n_depth",       par%n_depth,       init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","dt_iso",        par%dt_iso,        init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        call nml_read(filename,"trc","n_time_iso",    n_time_iso,        init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
+        if (allocated(par%time_iso)) deallocate(par%time_iso)
+        allocate(par%time_iso(n_time_iso))
+        call nml_read(filename,"trc","time_iso",      par%time_iso,      init=.TRUE.,defaults_file=def_file,defaults_group=def_group)
 
         ! Define additional parameter values
         par%is_sigma  = is_sigma
