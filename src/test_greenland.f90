@@ -27,20 +27,20 @@ program tracertest
     integer :: time_index
     integer, allocatable :: dims(:)
 
-    real(prec), allocatable :: xc(:), yc(:), zeta(:), zeta_ac(:)
-    real(prec), allocatable :: xc_ac(:), yc_ac(:)
-    real(prec), allocatable :: lon2D(:,:), lat2D(:,:)
-    real(prec), allocatable :: z_srf(:,:), H_ice(:,:)
+    real(wp), allocatable :: xc(:), yc(:), zeta(:), zeta_ac(:)
+    real(wp), allocatable :: xc_ac(:), yc_ac(:)
+    real(wp), allocatable :: lon2D(:,:), lat2D(:,:)
+    real(wp), allocatable :: z_srf(:,:), H_ice(:,:)
 
     ! Yelmo staggering: ux lives on the right border of H_ice(i,j) (acx nodes),
     ! uy on the top border (acy nodes), both on the zeta levels. uz lives at the
     ! cell centre horizontally but on the zeta_ac levels (layer interfaces).
     ! These are passed to tracer_update on their native axes (xc_ac, yc_ac,
     ! zeta_ac) — no host-side destaggering to aa-nodes.
-    real(prec), allocatable :: ux_acx(:,:,:), uy_acy(:,:,:), uz_ac(:,:,:)
+    real(wp), allocatable :: ux_acx(:,:,:), uy_acy(:,:,:), uz_ac(:,:,:)
 
     integer    :: k, nstep
-    real(prec) :: time, time_start, time_end
+    real(wp) :: time, time_start, time_end
     logical    :: dep_now, write_now, stats_now
 
     filename_nml = "Greenland.nml"
@@ -178,10 +178,10 @@ contains
 
         type(tracer_class), intent(IN) :: trc, trc_r
 
-        real(prec) :: tol
+        real(wp) :: tol
         integer    :: n_mismatch
 
-        tol = 1.0_prec        ! 1 m / 1 (m/a) — well above single-precision noise
+        tol = 1.0_wp        ! 1 m / 1 (m/a) — well above single-precision noise
 
         if (count(trc_r%now%active .ne. trc%now%active) .gt. 0) then
             write(0,*) "check_restart:: error: active mask differs after restart."
@@ -222,12 +222,12 @@ contains
 
     subroutine chk(name,a,b,active,tol,n_mismatch)
         character(len=*), intent(IN)    :: name
-        real(prec),       intent(IN)    :: a(:), b(:)
+        real(wp),       intent(IN)    :: a(:), b(:)
         integer,          intent(IN)    :: active(:)
-        real(prec),       intent(IN)    :: tol
+        real(wp),       intent(IN)    :: tol
         integer,          intent(INOUT) :: n_mismatch
 
-        real(prec) :: dmax
+        real(wp) :: dmax
 
         dmax = 0.0
         if (any(active.gt.0)) dmax = maxval(abs(a-b),mask=active.gt.0)
@@ -247,10 +247,10 @@ contains
         implicit none
 
         character(len=*), intent(IN) :: filename
-        real(prec),       intent(IN) :: xc_ref(:), yc_ref(:)
+        real(wp),       intent(IN) :: xc_ref(:), yc_ref(:)
 
-        real(prec), allocatable :: xc_chk(:), yc_chk(:)
-        real(prec), parameter   :: tol = 1.0    ! m
+        real(wp), allocatable :: xc_chk(:), yc_chk(:)
+        real(wp), parameter   :: tol = 1.0    ! m
 
         allocate(xc_chk(size(xc_ref)),yc_chk(size(yc_ref)))
 

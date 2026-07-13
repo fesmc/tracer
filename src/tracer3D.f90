@@ -2,6 +2,7 @@
 module tracer3D 
 
     use tracer_precision
+    use tracer_constants
     use tracer_interp
     use tracer_stats
     use bspline_module, only : bspline_3d
@@ -13,11 +14,11 @@ module tracer3D
     type tracer_par_trans_class
         integer :: nt 
 
-        real(prec), allocatable :: time(:)
-        real(prec), allocatable :: H_min_dep(:)
-        real(prec), allocatable :: dt_dep(:)
+        real(wp), allocatable :: time(:)
+        real(wp), allocatable :: H_min_dep(:)
+        real(wp), allocatable :: dt_dep(:)
         integer,    allocatable :: n_max_dep(:) 
-        real(prec), allocatable :: dt_write(:)
+        real(wp), allocatable :: dt_write(:)
         
     end type 
 
@@ -26,12 +27,12 @@ module tracer3D
         logical :: is_sigma                     ! Is the defined z-axis in sigma coords
         logical :: is_profile                   ! Is this a 2D (x-z) domain with a ghost y-axis
         real(prec_time) :: dt, dt_dep, dt_write
-        real(prec) :: H_min                     ! Minimum ice thickness to track (m)
-        real(prec) :: depth_max                 ! Maximum depth of tracer (fraction)
-        real(prec) :: U_max                     ! Maximum horizontal velocity of tracer to track (m/a)
-        real(prec) :: U_max_dep                 ! Maximum horizontal velocity allowed for tracer deposition (m/a)
-        real(prec) :: H_min_dep                 ! Minimum ice thickness for tracer deposition (m)
-        real(prec) :: alpha                     ! Slope of probability function ("linear"/"quadratic" weights)
+        real(wp) :: H_min                     ! Minimum ice thickness to track (m)
+        real(wp) :: depth_max                 ! Maximum depth of tracer (fraction)
+        real(wp) :: U_max                     ! Maximum horizontal velocity of tracer to track (m/a)
+        real(wp) :: U_max_dep                 ! Maximum horizontal velocity allowed for tracer deposition (m/a)
+        real(wp) :: H_min_dep                 ! Minimum ice thickness for tracer deposition (m)
+        real(wp) :: alpha                     ! Slope of probability function ("linear"/"quadratic" weights)
         character(len=56) :: weight             ! Deposition prob. distribution: vel, linear, quadratic, rand
         logical    :: noise                     ! Add noise to gridded deposition location
         integer    :: seed                      ! RNG seed; <= 0 => nondeterministic
@@ -41,12 +42,12 @@ module tracer3D
         ! to raise the odds that old deposition times survive to present day.
         logical    :: clone                     ! Enable cloning
         integer    :: n_clones                  ! Clones spawned per eligible tracer
-        real(prec) :: clone_depth_frac          ! Min depth (fraction of H) to be eligible
-        real(prec) :: clone_U_max               ! Max horizontal velocity to be eligible (m/a)
-        real(prec) :: clone_dep_time_min        ! Deposition-time window, lower bound (years)
-        real(prec) :: clone_dep_time_max        ! Deposition-time window, upper bound (years)
-        real(prec) :: clone_offset_xy           ! Half-width of uniform horizontal offset (m)
-        real(prec) :: clone_offset_z            ! Max upward vertical offset (m)
+        real(wp) :: clone_depth_frac          ! Min depth (fraction of H) to be eligible
+        real(wp) :: clone_U_max               ! Max horizontal velocity to be eligible (m/a)
+        real(wp) :: clone_dep_time_min        ! Deposition-time window, lower bound (years)
+        real(wp) :: clone_dep_time_max        ! Deposition-time window, upper bound (years)
+        real(wp) :: clone_offset_xy           ! Half-width of uniform horizontal offset (m)
+        real(wp) :: clone_offset_z            ! Max upward vertical offset (m)
 
         ! Transient parameters
         character(len=512) :: par_trans_file
@@ -70,31 +71,38 @@ module tracer3D
         integer, allocatable :: active(:), id(:)
         integer, allocatable :: parent(:)            ! id of the parent tracer if this is a clone, 0 if an original
         integer, allocatable :: n_cloned(:)          ! number of clones already spawned from this tracer
-        real(prec), allocatable :: x(:), y(:), z(:), sigma(:)
-        real(prec), allocatable :: ux(:), uy(:), uz(:)
-        real(prec), allocatable :: ax(:), ay(:), az(:)
-        real(prec), allocatable :: dpth(:), z_srf(:)
-        real(prec), allocatable :: thk(:)            ! Tracer thickness (for compression)
-        real(prec), allocatable :: T(:)              ! Current temperature of the tracer (for borehole comparison, internal melting...)
-        real(prec), allocatable :: H(:)
+        real(wp), allocatable :: x(:), y(:), z(:), sigma(:)
+        real(wp), allocatable :: ux(:), uy(:), uz(:)
+        real(wp), allocatable :: ax(:), ay(:), az(:)
+        real(wp), allocatable :: dpth(:), z_srf(:)
+        real(wp), allocatable :: thk(:)            ! Tracer thickness (for compression)
+        real(wp), allocatable :: T(:)              ! Current temperature of the tracer (for borehole comparison, internal melting...)
+        real(wp), allocatable :: H(:)
 
     end type 
 
     type tracer_dep_class
         ! Standard deposition information (time and place)
-        real(prec), allocatable :: time(:) 
-        real(prec), allocatable :: H(:) 
-        real(prec), allocatable :: x(:), y(:), z(:)
-        real(prec), allocatable :: lon(:), lat(:) 
+        real(wp), allocatable :: time(:)
+        real(wp), allocatable :: H(:)
+        real(wp), allocatable :: x(:), y(:), z(:)
+        real(wp), allocatable :: lon(:), lat(:)
 
-        ! Additional tracer deposition information (climate, isotopes, etc)
-        real(prec), allocatable :: t2m_ann(:), t2m_sum(:)      
-        real(prec), allocatable :: pr_ann(:), pr_sum(:)     
-        real(prec), allocatable :: t2m_prann(:) ! Precip-weighted temp
-        real(prec), allocatable :: d18O_ann(:)
-!         real(prec), allocatable :: dD(:)
+        ! Monthly climate/isotope tags at deposition, shape (n, nmon). These are
+        ! the inputs the host supplies; the annual quantities below are derived
+        ! from them at deposition time.
+        real(wp), allocatable :: t2m(:,:), pr(:,:), d18O(:,:)
 
-    end type 
+        ! Annual quantities derived from the monthly tags at deposition:
+        !   t2m_ann    - mean of monthly t2m
+        !   pr_ann     - mean of monthly pr
+        !   t2m_prann  - precip-weighted mean temperature
+        !   d18O_ann   - mean of monthly d18O
+        !   d18O_prann - precip-weighted mean d18O
+        real(wp), allocatable :: t2m_ann(:), pr_ann(:), t2m_prann(:)
+        real(wp), allocatable :: d18O_ann(:), d18O_prann(:)
+
+    end type
 
     type tracer_class 
         type(tracer_par_class)   :: par 
@@ -104,12 +112,16 @@ module tracer3D
 
     end type 
 
-    type(lin3_interp_par_type) :: par_lin 
-    type(bspline_3d)           :: bspline3d_ux, bspline3d_uy, bspline3d_uz 
+    type(lin3_interp_par_type) :: par_lin
+    type(bspline_3d)           :: bspline3d_ux, bspline3d_uy, bspline3d_uz
 
-    private 
+    ! Number of months in the deposition climate tags
+    integer, parameter :: nmon = 12
+
+    private
 
     ! For other tracer modules
+    public :: nmon
     public :: tracer_par_class
     public :: tracer_state_class
     public :: tracer_dep_class
@@ -134,7 +146,7 @@ contains
 
         type(tracer_class),   intent(OUT) :: trc
         character(len=*),     intent(IN)  :: filename
-        real(prec), intent(IN) :: x(:), y(:)
+        real(wp), intent(IN) :: x(:), y(:)
         logical,    intent(IN) :: is_sigma
         real(prec_time), intent(IN) :: time
         ! Grid metadata for the gridded-stats output; only meaningful when the
@@ -206,16 +218,16 @@ contains
 
     subroutine tracer_update(trc,time,x,y,z,z_srf,H,ux,uy,uz,              &
                              x_ux,y_uy,z_uz,                                &
-                             lon,lat,t2m_ann,t2m_sum,pr_ann,pr_sum,d18O_ann, &
+                             lon,lat,t2m,pr,d18O,d18O_ann,                  &
                              dep_now,stats_now,order,sigma_srf)
 
         implicit none
 
         type(tracer_class), intent(INOUT) :: trc
         real(prec_time), intent(IN) :: time
-        real(prec), intent(IN) :: x(:), y(:), z(:)
-        real(prec), intent(IN) :: z_srf(:,:), H(:,:)
-        real(prec), intent(IN) :: ux(:,:,:), uy(:,:,:), uz(:,:,:)
+        real(wp), intent(IN) :: x(:), y(:), z(:)
+        real(wp), intent(IN) :: z_srf(:,:), H(:,:)
+        real(wp), intent(IN) :: ux(:,:,:), uy(:,:,:), uz(:,:,:)
 
         ! Native staggered velocity axes (all optional). When present, the
         ! matching component is interpolated directly on its Arakawa-C location
@@ -227,36 +239,41 @@ contains
         !          than z, so size(uz,3) may differ from size(ux,3).
         ! Any axis left absent falls back to the aa axis (x, y, z), so the pure
         ! aa-node call is unchanged.
-        real(prec), intent(IN), optional :: x_ux(:), y_uy(:), z_uz(:)
+        real(wp), intent(IN), optional :: x_ux(:), y_uy(:), z_uz(:)
 
         ! Deposition tagging fields. All optional: a caller that only wants to
         ! advect particles need not synthesize climate forcing. Any field left
         ! out is recorded as MV in trc%dep.
-        real(prec), intent(IN), optional :: lon(:,:), lat(:,:)
-        real(prec), intent(IN), optional :: t2m_ann(:,:), t2m_sum(:,:)
-        real(prec), intent(IN), optional :: pr_ann(:,:), pr_sum(:,:)
-        real(prec), intent(IN), optional :: d18O_ann(:,:)
+        !   t2m, pr - monthly grids (nx,ny,nmon); the annual means and the
+        !             precip-weighted temperature are derived at deposition.
+        !   d18O    - monthly grid (nx,ny,nmon). If only the annual d18O_ann
+        !             (nx,ny) is supplied instead, all months are set to it.
+        real(wp), intent(IN), optional :: lon(:,:), lat(:,:)
+        real(wp), intent(IN), optional :: t2m(:,:,:), pr(:,:,:), d18O(:,:,:)
+        real(wp), intent(IN), optional :: d18O_ann(:,:)
 
         logical, intent(IN) :: dep_now, stats_now
         character(len=*), intent(IN), optional :: order 
-        real(prec), intent(IN), optional :: sigma_srf     ! Value at surface by default (1 or 0?)
+        real(wp), intent(IN), optional :: sigma_srf     ! Value at surface by default (1 or 0?)
 
         ! Local variables  
         character(len=3) :: idx_order
         integer    :: i, j, k, nx, ny, nz, nz_uz
         logical    :: rev_z, rev_z_uz, has_srf
-        real(prec) :: sigma_srf_val
-        real(prec), allocatable :: x1(:), y1(:), z1(:)
-        real(prec), allocatable :: x_ux1(:), y_uy1(:), z_uz1(:)
-        real(prec), allocatable :: z_srf1(:,:), H1(:,:)
-        real(prec), allocatable :: ux1(:,:,:), uy1(:,:,:), uz1(:,:,:)
-        real(prec), allocatable :: usig1(:,:,:)
-        real(prec), allocatable :: ux_srf_aa(:,:), uy_srf_aa(:,:)
-        real(prec), allocatable :: lon1(:,:), lat1(:,:), t2m_ann1(:,:), t2m_sum1(:,:), pr_ann1(:,:), pr_sum1(:,:), d18O_ann1(:,:)
-        real(prec) :: ux0, uy0, uz0
-        real(prec) :: sigp                        ! Normalized sigma of a particle (z relative to its column)
+        real(wp) :: sigma_srf_val
+        real(wp), allocatable :: x1(:), y1(:), z1(:)
+        real(wp), allocatable :: x_ux1(:), y_uy1(:), z_uz1(:)
+        real(wp), allocatable :: z_srf1(:,:), H1(:,:)
+        real(wp), allocatable :: ux1(:,:,:), uy1(:,:,:), uz1(:,:,:)
+        real(wp), allocatable :: usig1(:,:,:)
+        real(wp), allocatable :: ux_srf_aa(:,:), uy_srf_aa(:,:)
+        real(wp), allocatable :: lon1(:,:), lat1(:,:)
+        real(wp), allocatable :: t2m1(:,:,:), pr1(:,:,:), d18O1(:,:,:)   ! monthly (nx,ny,nmon)
+        real(wp) :: pr_sum_pt                                            ! sum of monthly precip at a point
+        real(wp) :: ux0, uy0, uz0
+        real(wp) :: sigp                        ! Normalized sigma of a particle (z relative to its column)
         type(lin3_interp_par_type) :: par_pt      ! Thread-local bilinear weights (kept off the shared par_lin for OpenMP)
-        real(prec) :: dt
+        real(wp) :: dt
 
         ! Update the transient parameters
         if (trc%par%use_par_trans) then 
@@ -324,13 +341,23 @@ contains
         if (dep_now) then
             ! Also reshape deposition fields. H1 is already reshaped, so it
             ! gives the (nx,ny) shape to fall back on for an absent field.
-            call reshape2D_optional(idx_order,lon1,     size(H1,1),size(H1,2),lon)
-            call reshape2D_optional(idx_order,lat1,     size(H1,1),size(H1,2),lat)
-            call reshape2D_optional(idx_order,t2m_ann1, size(H1,1),size(H1,2),t2m_ann)
-            call reshape2D_optional(idx_order,t2m_sum1, size(H1,1),size(H1,2),t2m_sum)
-            call reshape2D_optional(idx_order,pr_ann1,  size(H1,1),size(H1,2),pr_ann)
-            call reshape2D_optional(idx_order,pr_sum1,  size(H1,1),size(H1,2),pr_sum)
-            call reshape2D_optional(idx_order,d18O_ann1,size(H1,1),size(H1,2),d18O_ann)
+            call reshape2D_optional(idx_order,lon1,size(H1,1),size(H1,2),lon)
+            call reshape2D_optional(idx_order,lat1,size(H1,1),size(H1,2),lat)
+
+            ! Monthly climate grids. An absent field becomes an all-MV (nx,ny,nmon)
+            ! array so the per-point deposition code has a uniform shape to sample.
+            call reshape_monthly_optional(idx_order,t2m1, size(H1,1),size(H1,2),t2m)
+            call reshape_monthly_optional(idx_order,pr1,  size(H1,1),size(H1,2),pr)
+
+            ! d18O: prefer the monthly grid; else broadcast the annual grid across
+            ! all months; else leave all-MV.
+            if (present(d18O)) then
+                call reshape_monthly_optional(idx_order,d18O1,size(H1,1),size(H1,2),d18O)
+            else if (present(d18O_ann)) then
+                call reshape_annual_to_monthly(idx_order,d18O1,size(H1,1),size(H1,2),d18O_ann)
+            else
+                call reshape_monthly_optional(idx_order,d18O1,size(H1,1),size(H1,2))
+            end if
 
         end if
 
@@ -511,27 +538,58 @@ contains
 
                 ! An absent tagging field is recorded as MV rather than
                 ! interpolated from a placeholder array.
-                trc%dep%lon(i)      = MV
-                trc%dep%lat(i)      = MV
-                trc%dep%t2m_ann(i)  = MV
-                trc%dep%t2m_sum(i)  = MV
-                trc%dep%pr_ann(i)   = MV
-                trc%dep%pr_sum(i)   = MV
-                trc%dep%d18O_ann(i) = MV
+                trc%dep%lon(i) = MV
+                trc%dep%lat(i) = MV
+                if (present(lon)) trc%dep%lon(i) = interp_bilinear(par_lin,lon1)
+                if (present(lat)) trc%dep%lat(i) = interp_bilinear(par_lin,lat1)
 
-                if (present(lon))      trc%dep%lon(i)      = interp_bilinear(par_lin,lon1)
-                if (present(lat))      trc%dep%lat(i)      = interp_bilinear(par_lin,lat1)
-                if (present(t2m_ann))  trc%dep%t2m_ann(i)  = interp_bilinear(par_lin,t2m_ann1)
-                if (present(t2m_sum))  trc%dep%t2m_sum(i)  = interp_bilinear(par_lin,t2m_sum1)
-                if (present(pr_ann))   trc%dep%pr_ann(i)   = interp_bilinear(par_lin,pr_ann1)
-                if (present(pr_sum))   trc%dep%pr_sum(i)   = interp_bilinear(par_lin,pr_sum1)
-                if (present(d18O_ann)) trc%dep%d18O_ann(i) = interp_bilinear(par_lin,d18O_ann1)
+                ! Monthly climate tags interpolated to the deposition point, and
+                ! the annual quantities derived from them. An absent input arrived
+                ! here as an all-MV monthly grid, so each block is guarded on the
+                ! field's presence and records MV when it was not supplied.
+                trc%dep%t2m(i,:)      = MV
+                trc%dep%pr(i,:)       = MV
+                trc%dep%d18O(i,:)     = MV
+                trc%dep%t2m_ann(i)    = MV
+                trc%dep%pr_ann(i)     = MV
+                trc%dep%t2m_prann(i)  = MV
+                trc%dep%d18O_ann(i)   = MV
+                trc%dep%d18O_prann(i) = MV
 
-                ! Precip-weighted temperature is a derived field, not an input.
-                ! == TO DO == compute from t2m/pr rather than leaving it MV.
-                trc%dep%t2m_prann(i) = MV
+                if (present(t2m)) then
+                    do k = 1, nmon
+                        trc%dep%t2m(i,k) = interp_bilinear(par_lin,t2m1(:,:,k))
+                    end do
+                    trc%dep%t2m_ann(i) = sum(trc%dep%t2m(i,:))/real(nmon,wp)
+                end if
 
-                trc%now%active(i) = 2 
+                if (present(pr)) then
+                    do k = 1, nmon
+                        trc%dep%pr(i,k) = interp_bilinear(par_lin,pr1(:,:,k))
+                    end do
+                    trc%dep%pr_ann(i) = sum(trc%dep%pr(i,:))/real(nmon,wp)
+                end if
+
+                if (present(d18O) .or. present(d18O_ann)) then
+                    do k = 1, nmon
+                        trc%dep%d18O(i,k) = interp_bilinear(par_lin,d18O1(:,:,k))
+                    end do
+                    trc%dep%d18O_ann(i) = sum(trc%dep%d18O(i,:))/real(nmon,wp)
+                end if
+
+                ! Precip-weighted annual means (temperature, d18O), formed only
+                ! when precip is available and its annual sum is positive.
+                if (present(pr)) then
+                    pr_sum_pt = sum(trc%dep%pr(i,:))
+                    if (pr_sum_pt .gt. 0.0_wp) then
+                        if (present(t2m)) &
+                            trc%dep%t2m_prann(i)  = sum(trc%dep%t2m(i,:) *trc%dep%pr(i,:))/pr_sum_pt
+                        if (present(d18O) .or. present(d18O_ann)) &
+                            trc%dep%d18O_prann(i) = sum(trc%dep%d18O(i,:)*trc%dep%pr(i,:))/pr_sum_pt
+                    end if
+                end if
+
+                trc%now%active(i) = 2
 
             end if 
 
@@ -594,15 +652,15 @@ contains
 
         type(tracer_par_class),   intent(INOUT) :: par 
         type(tracer_state_class), intent(INOUT) :: now 
-        real(prec), intent(IN) :: x(:), y(:)
-        real(prec), intent(IN) :: H(:,:), lat(:,:), ux_srf(:,:), uy_srf(:,:) 
+        real(wp), intent(IN) :: x(:), y(:)
+        real(wp), intent(IN) :: H(:,:), lat(:,:), ux_srf(:,:), uy_srf(:,:) 
         integer, intent(IN) :: nmax  
 
         integer :: ntot  
-        real(prec) :: p(size(H,1),size(H,2)), p_init(size(H,1),size(H,2))
+        real(wp) :: p(size(H,1),size(H,2)), p_init(size(H,1),size(H,2))
         integer :: i, j, k, ij(2)
-        real(prec), allocatable :: jit(:,:)
-        real(prec) :: xmin, ymin, xmax, ymax 
+        real(wp), allocatable :: jit(:,:)
+        real(wp) :: xmin, ymin, xmax, ymax 
 
         ! How many points can be activated?
         ntot = min(nmax,count(now%active == 0))
@@ -738,8 +796,8 @@ contains
         implicit none 
 
         type(tracer_class),   intent(INOUT) :: trc  
-        real(prec), intent(IN) :: x(:), y(:) 
-        real(prec), intent(IN) :: Hmax 
+        real(wp), intent(IN) :: x(:), y(:) 
+        real(wp), intent(IN) :: Hmax 
 
         ! Deactivate points where:
         !  - Thickness of ice sheet at point's location is below threshold
@@ -797,11 +855,11 @@ contains
         type(tracer_par_class),   intent(INOUT) :: par
         type(tracer_state_class), intent(INOUT) :: now
         type(tracer_dep_class),   intent(INOUT) :: dep
-        real(prec), intent(IN) :: x(:), y(:)
+        real(wp), intent(IN) :: x(:), y(:)
 
         integer    :: i, j, c
-        real(prec) :: xmin, xmax, ymin, ymax
-        real(prec) :: off(3)
+        real(wp) :: xmin, xmax, ymin, ymax
+        real(wp) :: off(3)
 
         if (.not. par%clone) return
 
@@ -881,14 +939,16 @@ contains
                             dep%x(j)         = dep%x(i)
                             dep%y(j)         = dep%y(i)
                             dep%z(j)         = dep%z(i)
-                            dep%lon(j)       = dep%lon(i)
-                            dep%lat(j)       = dep%lat(i)
-                            dep%t2m_ann(j)   = dep%t2m_ann(i)
-                            dep%t2m_sum(j)   = dep%t2m_sum(i)
-                            dep%pr_ann(j)    = dep%pr_ann(i)
-                            dep%pr_sum(j)    = dep%pr_sum(i)
-                            dep%t2m_prann(j) = dep%t2m_prann(i)
-                            dep%d18O_ann(j)  = dep%d18O_ann(i)
+                            dep%lon(j)        = dep%lon(i)
+                            dep%lat(j)        = dep%lat(i)
+                            dep%t2m(j,:)      = dep%t2m(i,:)
+                            dep%pr(j,:)       = dep%pr(i,:)
+                            dep%d18O(j,:)     = dep%d18O(i,:)
+                            dep%t2m_ann(j)    = dep%t2m_ann(i)
+                            dep%pr_ann(j)     = dep%pr_ann(i)
+                            dep%t2m_prann(j)  = dep%t2m_prann(i)
+                            dep%d18O_ann(j)   = dep%d18O_ann(i)
+                            dep%d18O_prann(j) = dep%d18O_prann(i)
 
                             c = c + 1
 
@@ -922,9 +982,9 @@ contains
 
         implicit none 
 
-        real(prec),   intent(INOUT) :: x, y, z 
-        real(prec),   intent(IN)    :: ux, uy, uz 
-        real(prec),   intent(IN)    :: ax, ay, az 
+        real(wp),   intent(INOUT) :: x, y, z 
+        real(wp),   intent(IN)    :: ux, uy, uz 
+        real(wp),   intent(IN)    :: ax, ay, az 
         real(prec_time), intent(IN)    :: dt 
         integer,         intent(IN)    :: active 
 
@@ -948,13 +1008,13 @@ contains
 
         implicit none
 
-        real(prec), intent(IN)  :: z(:)
+        real(wp), intent(IN)  :: z(:)
         logical,    intent(IN)  :: is_sigma, has_srf
-        real(prec), intent(IN)  :: sigma_srf
-        real(prec), intent(INOUT), allocatable :: z1(:)
+        real(wp), intent(IN)  :: sigma_srf
+        real(wp), intent(INOUT), allocatable :: z1(:)
         logical,    intent(OUT) :: rev
 
-        real(prec), allocatable :: za(:)
+        real(wp), allocatable :: za(:)
 
         allocate(za(size(z)))
         za = z
@@ -991,13 +1051,13 @@ contains
 
         implicit none
 
-        real(prec), intent(IN) :: x(:), y(:), sigma(:)
-        real(prec), intent(IN) :: field(:,:,:)
-        real(prec), intent(IN) :: xp, yp, zp, z_srf_p, H_p
-        real(prec) :: u
+        real(wp), intent(IN) :: x(:), y(:), sigma(:)
+        real(wp), intent(IN) :: field(:,:,:)
+        real(wp), intent(IN) :: xp, yp, zp, z_srf_p, H_p
+        real(wp) :: u
 
-        real(prec) :: zc(size(sigma))
-        real(prec) :: xo, yo
+        real(wp) :: zc(size(sigma))
+        real(wp) :: xo, yo
         type(lin3_interp_par_type) :: par
 
         ! A staggered horizontal axis (acx/acy) is offset half a cell from the
@@ -1027,11 +1087,11 @@ contains
         implicit none
 
         type(bspline_3d), intent(INOUT) :: bspl
-        real(prec),       intent(IN)    :: x(:), y(:)
-        real(prec),       intent(IN)    :: xp, yp, sig
-        real(prec) :: u
+        real(wp),       intent(IN)    :: x(:), y(:)
+        real(wp),       intent(IN)    :: xp, yp, sig
+        real(wp) :: u
 
-        real(prec) :: xo, yo
+        real(wp) :: xo, yo
 
         xo = min(max(xp,min(x(1),x(size(x)))),max(x(1),x(size(x))))
         yo = min(max(yp,min(y(1),y(size(y)))),max(y(1),y(size(y))))
@@ -1051,13 +1111,13 @@ contains
 
         implicit none
 
-        real(prec), intent(IN) :: x_src(:), y_src(:)
-        real(prec), intent(IN) :: field(:,:)
-        real(prec), intent(IN) :: x_aa(:), y_aa(:)
-        real(prec) :: field_aa(size(x_aa),size(y_aa))
+        real(wp), intent(IN) :: x_src(:), y_src(:)
+        real(wp), intent(IN) :: field(:,:)
+        real(wp), intent(IN) :: x_aa(:), y_aa(:)
+        real(wp) :: field_aa(size(x_aa),size(y_aa))
 
         integer    :: i, j
-        real(prec) :: xo, yo, xmn, xmx, ymn, ymx
+        real(wp) :: xo, yo, xmn, xmx, ymn, ymx
         type(lin3_interp_par_type) :: par
 
         xmn = minval(x_src); xmx = maxval(x_src)
@@ -1080,12 +1140,12 @@ contains
 
         implicit none 
 
-        real(prec), intent(IN) :: uv(:,:), H(:,:)
-        real(prec), intent(IN) :: uv_max, H_min 
-        real(prec) :: p(size(H,1),size(H,2))
+        real(wp), intent(IN) :: uv(:,:), H(:,:)
+        real(wp), intent(IN) :: uv_max, H_min 
+        real(wp) :: p(size(H,1),size(H,2))
 
         ! Local variables
-        real(prec) :: p_sum 
+        real(wp) :: p_sum 
 
         
         p = 0.0
@@ -1107,14 +1167,14 @@ contains
 
         implicit none 
 
-        real(prec), intent(IN) :: H(:,:)
-        real(prec), intent(IN) :: H_min, alpha 
+        real(wp), intent(IN) :: H(:,:)
+        real(wp), intent(IN) :: H_min, alpha 
         character(len=*), intent(IN) :: dist 
-        real(prec) :: p(size(H,1),size(H,2))
+        real(wp) :: p(size(H,1),size(H,2))
 
         ! Local variables
         integer    :: k, ij(2)
-        real(prec) :: p_sum, H_range
+        real(wp) :: p_sum, H_range
 
         ! No cell is thick enough to deposit into. Return an all-zero field;
         ! the caller treats a zero sum as "no valid deposition sites". This
@@ -1161,13 +1221,13 @@ contains
 
         implicit none 
 
-        real(prec), intent(IN) :: x(:), y(:), u(:,:), v(:,:) 
-        real(prec), intent(IN) :: theta_max 
-        real(prec) :: p(size(u,1),size(u,2))
+        real(wp), intent(IN) :: x(:), y(:), u(:,:), v(:,:) 
+        real(wp), intent(IN) :: theta_max 
+        real(wp) :: p(size(u,1),size(u,2))
 
         ! Local variables
         integer    :: k, ij(2)
-        real(prec) :: p_sum 
+        real(wp) :: p_sum 
 
         p = 1.0 
 
@@ -1184,8 +1244,8 @@ contains
 
         implicit none 
 
-        real(prec), intent(IN) :: x1, y1, x2, y2 
-        real(prec) :: theta 
+        real(wp), intent(IN) :: x1, y1, x2, y2 
+        real(wp) :: theta 
 
         theta = atan2((y2-y1),(x2-x1))
 
@@ -1511,8 +1571,9 @@ contains
         
         allocate(dep%time(n), dep%H(n))
         allocate(dep%x(n), dep%y(n), dep%z(n), dep%lon(n), dep%lat(n))
-        allocate(dep%t2m_ann(n), dep%t2m_sum(n), dep%pr_ann(n), dep%pr_sum(n),dep%t2m_prann(n))
-        allocate(dep%d18O_ann(n))
+        allocate(dep%t2m(n,nmon), dep%pr(n,nmon), dep%d18O(n,nmon))
+        allocate(dep%t2m_ann(n), dep%pr_ann(n), dep%t2m_prann(n))
+        allocate(dep%d18O_ann(n), dep%d18O_prann(n))
         
         return
 
@@ -1554,12 +1615,14 @@ contains
         if (allocated(dep%y))         deallocate(dep%y)
         if (allocated(dep%lon))       deallocate(dep%lon)
         if (allocated(dep%lat))       deallocate(dep%lat)
-        if (allocated(dep%t2m_ann))   deallocate(dep%t2m_ann)
-        if (allocated(dep%t2m_sum))   deallocate(dep%t2m_sum)
-        if (allocated(dep%pr_ann))    deallocate(dep%pr_ann)
-        if (allocated(dep%pr_sum))    deallocate(dep%pr_sum)
-        if (allocated(dep%t2m_prann)) deallocate(dep%t2m_prann)
-        if (allocated(dep%d18O_ann))  deallocate(dep%d18O_ann)
+        if (allocated(dep%t2m))        deallocate(dep%t2m)
+        if (allocated(dep%pr))         deallocate(dep%pr)
+        if (allocated(dep%d18O))       deallocate(dep%d18O)
+        if (allocated(dep%t2m_ann))    deallocate(dep%t2m_ann)
+        if (allocated(dep%pr_ann))     deallocate(dep%pr_ann)
+        if (allocated(dep%t2m_prann))  deallocate(dep%t2m_prann)
+        if (allocated(dep%d18O_ann))   deallocate(dep%d18O_ann)
+        if (allocated(dep%d18O_prann)) deallocate(dep%d18O_prann)
         
         return
 
@@ -1575,9 +1638,9 @@ contains
         implicit none
 
         character(len=*), intent(IN) :: idx_order
-        real(prec), intent(INOUT), allocatable :: var1(:,:)
+        real(wp), intent(INOUT), allocatable :: var1(:,:)
         integer,    intent(IN) :: nx, ny
-        real(prec), intent(IN), optional :: var(:,:)
+        real(wp), intent(IN), optional :: var(:,:)
 
         if (present(var)) then
 
@@ -1595,12 +1658,81 @@ contains
 
     end subroutine reshape2D_optional
 
+    subroutine reshape_monthly_optional(idx_order,var1,nx,ny,var)
+        ! Reshape an optional monthly deposition field to (nx,ny,nmon). The month
+        ! axis is the trailing dimension; each month's horizontal slice is reshaped
+        ! with the same idx_order convention as the 2D tagging fields. When the
+        ! caller omitted the field, produce an all-MV (nx,ny,nmon) array so the
+        ! per-point deposition code has a correctly-shaped array to sample.
+
+        implicit none
+
+        character(len=*), intent(IN) :: idx_order
+        real(wp), intent(INOUT), allocatable :: var1(:,:,:)
+        integer,  intent(IN) :: nx, ny
+        real(wp), intent(IN), optional :: var(:,:,:)
+
+        integer :: m
+        real(wp), allocatable :: slice1(:,:)
+
+        if (allocated(var1)) deallocate(var1)
+        allocate(var1(nx,ny,nmon))
+
+        if (present(var)) then
+
+            if (size(var,3) .ne. nmon) then
+                write(0,*) "reshape_monthly_optional:: error: month axis /= nmon: ", size(var,3), nmon
+                error stop
+            end if
+
+            do m = 1, nmon
+                call tracer_reshape2D_field(idx_order,var(:,:,m),slice1)
+                var1(:,:,m) = slice1
+            end do
+
+        else
+
+            var1 = MV
+
+        end if
+
+        return
+
+    end subroutine reshape_monthly_optional
+
+    subroutine reshape_annual_to_monthly(idx_order,var1,nx,ny,var)
+        ! Broadcast an annual (nx,ny) field across all nmon months, producing
+        ! (nx,ny,nmon). Used for d18O when only the annual value is supplied.
+
+        implicit none
+
+        character(len=*), intent(IN) :: idx_order
+        real(wp), intent(INOUT), allocatable :: var1(:,:,:)
+        integer,  intent(IN) :: nx, ny
+        real(wp), intent(IN) :: var(:,:)
+
+        integer :: m
+        real(wp), allocatable :: ann1(:,:)
+
+        call tracer_reshape2D_field(idx_order,var,ann1)
+
+        if (allocated(var1)) deallocate(var1)
+        allocate(var1(nx,ny,nmon))
+
+        do m = 1, nmon
+            var1(:,:,m) = ann1
+        end do
+
+        return
+
+    end subroutine reshape_annual_to_monthly
+
     subroutine tracer_reshape1D_vec(var,var1,rev)
 
         implicit none 
      
-        real(prec),    intent(IN) :: var(:)
-        real(prec), intent(INOUT), allocatable :: var1(:)
+        real(wp),    intent(IN) :: var(:)
+        real(wp), intent(INOUT), allocatable :: var1(:)
         logical,    intent(IN) :: rev 
 
         integer :: i, nx
@@ -1626,8 +1758,8 @@ contains
         implicit none 
 
         character(len=3), intent(IN) :: idx_order 
-        real(prec),    intent(IN) :: var(:,:)
-        real(prec), intent(INOUT), allocatable :: var1(:,:)
+        real(wp),    intent(IN) :: var(:,:)
+        real(wp), intent(INOUT), allocatable :: var1(:,:)
         integer :: i, j
         integer :: nx, ny
 
@@ -1676,8 +1808,8 @@ contains
         implicit none 
 
         character(len=3), intent(IN) :: idx_order 
-        real(prec),    intent(IN) :: var(:,:,:)
-        real(prec), intent(INOUT), allocatable :: var1(:,:,:)
+        real(wp),    intent(IN) :: var(:,:,:)
+        real(wp), intent(INOUT), allocatable :: var1(:,:,:)
         logical,    intent(IN) :: rev_z   ! Reverse the z-axis? 
         integer :: i, j, k
         integer :: nx, ny, nz 

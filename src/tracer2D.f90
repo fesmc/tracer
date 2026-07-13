@@ -27,11 +27,11 @@ contains
 
         implicit none
 
-        real(prec) :: y(NY_GHOST)
+        real(wp) :: y(NY_GHOST)
         integer    :: j
 
         do j = 1, NY_GHOST
-            y(j) = real(j-1,prec) / real(NY_GHOST-1,prec)
+            y(j) = real(j-1,wp) / real(NY_GHOST-1,wp)
         end do
 
         return
@@ -45,11 +45,11 @@ contains
 
         type(tracer_class),   intent(OUT) :: trc 
         character(len=*),     intent(IN)  :: filename 
-        real(prec), intent(IN) :: x(:)
+        real(wp), intent(IN) :: x(:)
         logical,    intent(IN) :: is_sigma 
         real(prec_time) :: time 
 
-        real(prec) :: y(NY_GHOST)
+        real(wp) :: y(NY_GHOST)
 
         ! Define the ghost y-dimension. Must match tracer2D_update.
         y = ghost_yaxis()
@@ -67,37 +67,38 @@ contains
 
 
     subroutine tracer2D_update(trc,time,x,z,z_srf,H,ux,uz, &
-                               lon,lat,t2m_ann,t2m_sum,pr_ann,pr_sum,d18O_ann, &
+                               lon,lat,t2m,pr,d18O,d18O_ann, &
                                dep_now,stats_now)
 
-        implicit none 
+        implicit none
 
-        type(tracer_class), intent(INOUT) :: trc 
-        real(prec_time), intent(IN) :: time 
-        real(prec), intent(IN) :: x(:), z(:)
-        real(prec), intent(IN) :: z_srf(:), H(:)
-        real(prec), intent(IN) :: ux(:,:), uz(:,:)
+        type(tracer_class), intent(INOUT) :: trc
+        real(prec_time), intent(IN) :: time
+        real(wp), intent(IN) :: x(:), z(:)
+        real(wp), intent(IN) :: z_srf(:), H(:)
+        real(wp), intent(IN) :: ux(:,:), uz(:,:)
 
-        ! Deposition tagging fields, all optional (see tracer_update).
-        real(prec), intent(IN), optional :: lon(:), lat(:)
-        real(prec), intent(IN), optional :: t2m_ann(:), t2m_sum(:)
-        real(prec), intent(IN), optional :: pr_ann(:), pr_sum(:)
-        real(prec), intent(IN), optional :: d18O_ann(:)
+        ! Deposition tagging fields, all optional (see tracer_update). The
+        ! monthly climate profiles are (nx,nmon); d18O may instead be given as
+        ! the annual profile d18O_ann (nx).
+        real(wp), intent(IN), optional :: lon(:), lat(:)
+        real(wp), intent(IN), optional :: t2m(:,:), pr(:,:), d18O(:,:)
+        real(wp), intent(IN), optional :: d18O_ann(:)
 
         logical,    intent(IN) :: dep_now, stats_now
 
         ! Local variables
-        real(prec) :: y(NY_GHOST)
-        real(prec), allocatable :: z_srf_2D(:,:), H_2D(:,:)
-        real(prec), allocatable :: ux_3D(:,:,:), uy_3D(:,:,:), uz_3D(:,:,:)
-        real(prec), allocatable :: lon_2D(:,:), lat_2D(:,:), t2m_ann_2D(:,:), t2m_sum_2D(:,:) 
-        real(prec), allocatable :: pr_ann_2D(:,:), pr_sum_2D(:,:), d18O_ann_2D(:,:)
-        
-        integer :: j, ny 
+        real(wp) :: y(NY_GHOST)
+        real(wp), allocatable :: z_srf_2D(:,:), H_2D(:,:)
+        real(wp), allocatable :: ux_3D(:,:,:), uy_3D(:,:,:), uz_3D(:,:,:)
+        real(wp), allocatable :: lon_2D(:,:), lat_2D(:,:), d18O_ann_2D(:,:)
+        real(wp), allocatable :: t2m_3D(:,:,:), pr_3D(:,:,:), d18O_3D(:,:,:)   ! (nx,ny,nmon)
+
+        integer :: j, ny
 
         ny = size(y,1)
 
-        ! Define ghost dimension and data 
+        ! Define ghost dimension and data
         allocate(z_srf_2D(size(x,1),ny))
         allocate(H_2D(size(x,1),ny))
         allocate(ux_3D(size(ux,1),ny,size(ux,2)))
@@ -108,10 +109,9 @@ contains
         ! so absence propagates through this wrapper.
         if (present(lon))      allocate(lon_2D(size(x,1),ny))
         if (present(lat))      allocate(lat_2D(size(x,1),ny))
-        if (present(t2m_ann))  allocate(t2m_ann_2D(size(x,1),ny))
-        if (present(t2m_sum))  allocate(t2m_sum_2D(size(x,1),ny))
-        if (present(pr_ann))   allocate(pr_ann_2D(size(x,1),ny))
-        if (present(pr_sum))   allocate(pr_sum_2D(size(x,1),ny))
+        if (present(t2m))      allocate(t2m_3D(size(x,1),ny,size(t2m,2)))
+        if (present(pr))       allocate(pr_3D(size(x,1),ny,size(pr,2)))
+        if (present(d18O))     allocate(d18O_3D(size(x,1),ny,size(d18O,2)))
         if (present(d18O_ann)) allocate(d18O_ann_2D(size(x,1),ny))
 
         ! Define the ghost y-dimension. Must match tracer2D_init.
@@ -129,10 +129,9 @@ contains
 
             if (present(lon))      lon_2D(:,j)      = lon
             if (present(lat))      lat_2D(:,j)      = lat
-            if (present(t2m_ann))  t2m_ann_2D(:,j)  = t2m_ann
-            if (present(t2m_sum))  t2m_sum_2D(:,j)  = t2m_sum
-            if (present(pr_ann))   pr_ann_2D(:,j)   = pr_ann
-            if (present(pr_sum))   pr_sum_2D(:,j)   = pr_sum
+            if (present(t2m))      t2m_3D(:,j,:)    = t2m
+            if (present(pr))       pr_3D(:,j,:)     = pr
+            if (present(d18O))     d18O_3D(:,j,:)   = d18O
             if (present(d18O_ann)) d18O_ann_2D(:,j) = d18O_ann
 
         end do
@@ -140,11 +139,11 @@ contains
         ! Now update tracers using 3D call. Velocities are already on aa-nodes
         ! here, so the native staggered axes (x_ux/y_uy/z_uz) are left absent.
         call tracer_update(trc,time,x,y,z,z_srf_2D,H_2D,ux_3D,uy_3D,uz_3D, &
-                            lon=lon_2D,lat=lat_2D,t2m_ann=t2m_ann_2D,t2m_sum=t2m_sum_2D, &
-                            pr_ann=pr_ann_2D,pr_sum=pr_sum_2D,d18O_ann=d18O_ann_2D, &
+                            lon=lon_2D,lat=lat_2D,t2m=t2m_3D,pr=pr_3D,d18O=d18O_3D, &
+                            d18O_ann=d18O_ann_2D, &
                             dep_now=dep_now,stats_now=stats_now,order="ijk")
 
-        return 
+        return
 
     end subroutine tracer2D_update
 

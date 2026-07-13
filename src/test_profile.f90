@@ -13,10 +13,10 @@ program tracertest
     type profile_class 
         integer :: nx, nz
         integer, allocatable :: dims(:)
-        real(prec) :: L, A, H0, G, B, M  
-        real(prec), allocatable :: xc(:), sigma(:)
-        real(prec), allocatable :: zs(:), zb(:), H(:), dHdx(:), ux(:,:), uz(:,:)
-        real(prec), allocatable :: age(:)
+        real(wp) :: L, A, H0, G, B, M  
+        real(wp), allocatable :: xc(:), sigma(:)
+        real(wp), allocatable :: zs(:), zb(:), H(:), dHdx(:), ux(:,:), uz(:,:)
+        real(wp), allocatable :: age(:)
 
         character(len=512) :: filename
     end type 
@@ -24,7 +24,7 @@ program tracertest
     type(profile_class) :: prof1 
     
     integer :: k, kmax, q 
-    real(prec) :: time, time_start, time_end  
+    real(wp) :: time, time_start, time_end  
     logical    :: dep_now, write_now
 
     ! The namelist to run may be given as the first command-line argument, so
@@ -118,21 +118,21 @@ contains
 !         integer, parameter :: nx = 51 
 !         integer, parameter :: nz = 101 
         integer,    parameter :: ng  = 3          ! exponent
-        real(prec), parameter :: rho = 910.0     ! kg/m^3
-        real(prec), parameter :: gg  = 9.81        ! m/s
-        real(prec), parameter :: A   = 10.0**(-16) ! Pa^3/a
-!         real(prec), parameter :: M = 0.1         ! m/a
-!         real(prec), parameter :: L = 10.0**6     ! m 
+        real(wp), parameter :: rho = 910.0     ! kg/m^3
+        real(wp), parameter :: gg  = 9.81        ! m/s
+        real(wp), parameter :: A   = 10.0**(-16) ! Pa^3/a
+!         real(wp), parameter :: M = 0.1         ! m/a
+!         real(wp), parameter :: L = 10.0**6     ! m 
 
         ! Loaded parameters
         integer :: nx, nz 
-        real(prec) :: L, G, B 
-        real(prec) :: ux_fac 
+        real(wp) :: L, G, B 
+        real(wp) :: ux_fac 
 
         ! Local variables 
         integer :: i, j 
-        real(prec) :: H0, dHdx, H 
-        real(prec) :: M
+        real(wp) :: H0, dHdx, H 
+        real(wp) :: M
         
         ! Load parameters 
         call nml_read(filename,"rh_par","nx",nx)
@@ -248,7 +248,7 @@ contains
         write(str_nz,"(i5)") prof%nz
         str_nz = adjustl(str_nz)
         write(str_prec,*) "sp"
-        if (kind(1.d0)==prec) write(str_prec,*) "dp"
+        if (kind(1.d0)==wp) write(str_prec,*) "dp"
         str_prec = adjustl(str_prec)
 
         write(str_dt,"(f5.1)") dt

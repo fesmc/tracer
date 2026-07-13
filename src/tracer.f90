@@ -4,6 +4,7 @@ module tracer
     use bspline_module, only : bspline_3d 
     
     use tracer_precision
+    use tracer_constants
     use tracer_interp
     use tracer_stats
 

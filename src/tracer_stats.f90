@@ -22,6 +22,7 @@ module tracer_stats
     ! types, so it does not depend on tracer3D (which embeds tracer_stats_class).
 
     use tracer_precision
+    use tracer_constants
     use ncio
     use coords, only : grid_class, grid_write
 
@@ -89,7 +90,7 @@ contains
         implicit none
 
         type(tracer_stats_class), intent(INOUT) :: st
-        real(prec),       intent(IN) :: x(:), y(:)
+        real(wp),       intent(IN) :: x(:), y(:)
         real(prec_wrt),   intent(IN) :: depth_norm(:), age_iso(:)
         real(prec_wrt),   intent(IN) :: dt_iso
         type(grid_class), intent(IN), optional :: grid
@@ -201,15 +202,15 @@ contains
         type(tracer_stats_class), intent(INOUT) :: st
         real(prec_time), intent(IN) :: time
         integer,    intent(IN) :: active(:)
-        real(prec), intent(IN) :: px(:), py(:), dpth(:), H(:)
-        real(prec), intent(IN) :: dep_time(:), dep_z(:), dep_lon(:), dep_lat(:)
-        real(prec), intent(IN) :: dep_t2m_ann(:), dep_pr_ann(:), dep_d18O_ann(:)
+        real(wp), intent(IN) :: px(:), py(:), dpth(:), H(:)
+        real(wp), intent(IN) :: dep_time(:), dep_z(:), dep_lon(:), dep_lat(:)
+        real(wp), intent(IN) :: dep_t2m_ann(:), dep_pr_ann(:), dep_d18O_ann(:)
 
         integer :: nx, ny, ndepth, niso
         integer :: p, i, j, q, qi, f
         real(prec_wrt) :: sig
         real(dp) :: time_ka, age_ka, v
-        real(prec) :: vals(N_TAG)
+        real(wp) :: vals(N_TAG)
 
         ! Double-precision accumulators (freed on return)
         real(dp), allocatable :: acc_sum(:,:,:,:), acc_sq(:,:,:,:)
@@ -309,8 +310,8 @@ contains
 
         elemental function to_ka(t) result(t_ka)
             ! Convert a deposition time [years] to ka, preserving MV.
-            real(prec), intent(IN) :: t
-            real(prec) :: t_ka
+            real(wp), intent(IN) :: t
+            real(wp) :: t_ka
             if (t .eq. MV) then
                 t_ka = MV
             else
@@ -487,7 +488,7 @@ contains
 
         type(tracer_stats_class), intent(IN) :: st
         character(len=*), intent(IN) :: fldr, filename
-        real(prec), intent(IN), optional :: H_ice(:,:)
+        real(wp), intent(IN), optional :: H_ice(:,:)
 
         character(len=512) :: path
         integer :: f

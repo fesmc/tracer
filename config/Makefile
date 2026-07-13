@@ -63,27 +63,31 @@ obj_bspline =	$(objdir)/bspline_sub_module.o \
 $(objdir)/tracer_precision.o: $(srcdir)/tracer_precision.f90
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/tracer_interp.o: $(srcdir)/tracer_interp.f90 $(objdir)/tracer_precision.o $(objdir)/bspline_module.o
+$(objdir)/tracer_constants.o: $(srcdir)/tracer_constants.f90 $(objdir)/tracer_precision.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/tracer_stats.o: $(srcdir)/tracer_stats.f90 $(objdir)/tracer_precision.o
+$(objdir)/tracer_interp.o: $(srcdir)/tracer_interp.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_constants.o $(objdir)/bspline_module.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/tracer3D.o: $(srcdir)/tracer3D.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_interp.o \
+$(objdir)/tracer_stats.o: $(srcdir)/tracer_stats.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_constants.o
+	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
+
+$(objdir)/tracer3D.o: $(srcdir)/tracer3D.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_constants.o $(objdir)/tracer_interp.o \
 					$(objdir)/tracer_stats.o $(objdir)/bspline_module.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
 $(objdir)/tracer2D.o: $(srcdir)/tracer2D.f90 $(objdir)/tracer3D.o $(objdir)/tracer_precision.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/tracer_io.o: $(srcdir)/tracer_io.f90 $(objdir)/tracer3D.o $(objdir)/tracer_precision.o $(objdir)/tracer_interp.o
+$(objdir)/tracer_io.o: $(srcdir)/tracer_io.f90 $(objdir)/tracer3D.o $(objdir)/tracer_precision.o $(objdir)/tracer_constants.o $(objdir)/tracer_interp.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/tracer.o: $(srcdir)/tracer.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_interp.o \
+$(objdir)/tracer.o: $(srcdir)/tracer.f90 $(objdir)/tracer_precision.o $(objdir)/tracer_constants.o $(objdir)/tracer_interp.o \
 					$(objdir)/tracer_stats.o $(objdir)/tracer3D.o $(objdir)/tracer2D.o $(objdir)/tracer_io.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
 obj_tracer =	$(objdir)/tracer_precision.o \
+				$(objdir)/tracer_constants.o \
 				$(objdir)/tracer_interp.o \
 				$(objdir)/tracer_stats.o \
 				$(objdir)/tracer3D.o \

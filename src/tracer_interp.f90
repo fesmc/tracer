@@ -2,18 +2,19 @@
 module tracer_interp 
 
     use tracer_precision 
+    use tracer_constants 
     use bspline_module 
 
     implicit none 
 
     type lin_interp_par_type 
         integer    :: i1, i2 
-        real(prec) :: alpha
+        real(wp) :: alpha
     end type 
 
     type lin3_interp_par_type 
         integer    :: i1, i2, j1, j2, k1, k2  
-        real(prec) :: alpha_x, alpha_y, alpha_z
+        real(wp) :: alpha_x, alpha_y, alpha_z
     end type 
 
     private
@@ -32,9 +33,9 @@ contains
         implicit none 
 
         integer,    intent(OUT) :: idx1, idx2  
-        real(prec), intent(OUT) :: alpha 
-        real(prec), intent(IN)  :: x(:)
-        real(prec), intent(IN)  :: xout
+        real(wp), intent(OUT) :: alpha 
+        real(wp), intent(IN)  :: x(:)
+        real(wp), intent(IN)  :: xout
 
         if (x(1) .lt. x(size(x))) then 
 
@@ -59,9 +60,9 @@ contains
         implicit none 
 
         integer,    intent(OUT) :: idx1, idx2  
-        real(prec), intent(OUT) :: alpha 
-        real(prec), intent(IN)  :: x(:)
-        real(prec), intent(IN)  :: xout
+        real(wp), intent(OUT) :: alpha 
+        real(wp), intent(IN)  :: x(:)
+        real(wp), intent(IN)  :: xout
 
         integer :: i, nx
 
@@ -107,9 +108,9 @@ contains
         implicit none 
 
         integer,    intent(OUT) :: idx1, idx2
-        real(prec), intent(OUT) :: alpha 
-        real(prec), intent(IN)  :: x(:)
-        real(prec), intent(IN)  :: xout
+        real(wp), intent(OUT) :: alpha 
+        real(wp), intent(IN)  :: x(:)
+        real(wp), intent(IN)  :: xout
 
         integer :: i, nx
 
@@ -151,8 +152,8 @@ contains
 
         implicit none 
 
-        real(prec), intent(IN) :: x(:), y(:) 
-        real(prec), intent(IN) :: xout, yout
+        real(wp), intent(IN) :: x(:), y(:) 
+        real(wp), intent(IN) :: xout, yout
         type(lin3_interp_par_type)   :: par 
 
         call calc_interp_linear_weights(par%i1,par%i2,par%alpha_x,x,xout)
@@ -170,8 +171,8 @@ contains
 
         implicit none 
 
-        real(prec), intent(IN) :: x(:), y(:), z(:) 
-        real(prec), intent(IN) :: xout, yout, zout
+        real(wp), intent(IN) :: x(:), y(:), z(:) 
+        real(wp), intent(IN) :: xout, yout, zout
         type(lin3_interp_par_type)   :: par 
 
         call calc_interp_linear_weights(par%i1,par%i2,par%alpha_x,x,xout)
@@ -187,9 +188,9 @@ contains
         implicit none 
 
         type(lin3_interp_par_type), intent(IN) :: par
-        real(prec), intent(IN) :: var(:,:) 
-        real(prec) :: varout 
-        real(prec) :: p1, p2
+        real(wp), intent(IN) :: var(:,:) 
+        real(wp) :: varout 
+        real(wp) :: p1, p2
         integer    :: i1, i2, j1, j2
 
         varout = MV 
@@ -218,9 +219,9 @@ contains
         implicit none 
 
         type(lin3_interp_par_type), intent(IN) :: par
-        real(prec), intent(IN) :: var(:,:,:) 
-        real(prec) :: varout 
-        real(prec) :: p1, p2, v1, v2 
+        real(wp), intent(IN) :: var(:,:,:) 
+        real(wp) :: varout 
+        real(wp) :: p1, p2, v1, v2 
         integer    :: i1, i2, j1, j2, k1, k2  
 
         varout = MV 
@@ -263,8 +264,8 @@ contains
         implicit none 
 
         type(bspline_3d), intent(INOUT) :: bspl3D 
-        real(prec),       intent(IN)    :: x(:), y(:), z(:)
-        real(prec),       intent(IN)    :: var(:,:,:)
+        real(wp),       intent(IN)    :: x(:), y(:), z(:)
+        real(wp),       intent(IN)    :: var(:,:,:)
 
         ! Local variables
         integer :: bspline_flag
@@ -303,8 +304,8 @@ contains
         implicit none 
 
         type(bspline_3d), intent(INOUT) :: bspl3D 
-        real(prec),       intent(IN)    :: x, y, z
-        real(prec)                      :: var
+        real(wp),       intent(IN)    :: x, y, z
+        real(wp)                      :: var
 
         ! Local variables
         integer :: idx, idy, idz 

@@ -4,6 +4,7 @@ module tracer_io
     use ncio 
 
     use tracer_precision
+    use tracer_constants
     use tracer_interp 
     use tracer3D 
 
@@ -37,9 +38,10 @@ contains
 
         path_out = trim(fldr)//"/"//trim(filename)
 
-        ! Create output file 
+        ! Create output file
         call nc_create(path_out)
         call nc_write_dim(path_out,"pt",x=1,dx=1,nx=trc%par%n)
+        call nc_write_dim(path_out,"month",x=1,dx=1,nx=nmon)
         call nc_write_dim(path_out,"time",x=real(mv,prec_wrt),unlimited=.TRUE.)
 
         return 
@@ -177,21 +179,26 @@ contains
             call nc_write(path_out,"dep_lat",real(trc%dep%lat,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                             start=[1,nt],count=[trc%par%n ,1],units="degrees_north")
         end if
+        ! Monthly climate/isotope tags (pt, month). Stored so the archive holds
+        ! the complete deposition record the annual quantities are derived from.
+        call nc_write(path_out,"dep_t2m",real(trc%dep%t2m,prec_wrt),dim1="pt",dim2="month",dim3="time", missing_value=mv_wrt, &
+                        start=[1,1,nt],count=[trc%par%n,nmon,1],units="K")
+        call nc_write(path_out,"dep_pr",real(trc%dep%pr,prec_wrt),dim1="pt",dim2="month",dim3="time", missing_value=mv_wrt, &
+                        start=[1,1,nt],count=[trc%par%n,nmon,1],units="m/a")
+        call nc_write(path_out,"dep_d18O",real(trc%dep%d18O,prec_wrt),dim1="pt",dim2="month",dim3="time", missing_value=mv_wrt, &
+                        start=[1,1,nt],count=[trc%par%n,nmon,1],units="permil")
+
+        ! Annual quantities derived from the monthly tags at deposition.
         call nc_write(path_out,"dep_t2m_ann",real(trc%dep%t2m_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="K")
         call nc_write(path_out,"dep_pr_ann",real(trc%dep%pr_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="m/a")
-        call nc_write(path_out,"dep_d18O_ann",real(trc%dep%d18O_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
-                        start=[1,nt],count=[trc%par%n ,1],units="permil")
-
-        ! Remaining deposition tags. Previously left out (they do not affect
-        ! advection); stored now so the archive holds the complete dep record.
-        call nc_write(path_out,"dep_t2m_sum",real(trc%dep%t2m_sum,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
-                        start=[1,nt],count=[trc%par%n ,1],units="K")
-        call nc_write(path_out,"dep_pr_sum",real(trc%dep%pr_sum,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
-                        start=[1,nt],count=[trc%par%n ,1],units="m/a")
         call nc_write(path_out,"dep_t2m_prann",real(trc%dep%t2m_prann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="K")
+        call nc_write(path_out,"dep_d18O_ann",real(trc%dep%d18O_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="permil")
+        call nc_write(path_out,"dep_d18O_prann",real(trc%dep%d18O_prann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="permil")
 
         return
 
@@ -293,12 +300,14 @@ contains
             call nc_read(filename,"dep_lon", trc%dep%lon, start=[1,nt],count=[n,1])
             call nc_read(filename,"dep_lat", trc%dep%lat, start=[1,nt],count=[n,1])
         end if
-        call nc_read(filename,"dep_t2m_ann",  trc%dep%t2m_ann,  start=[1,nt],count=[n,1])
-        call nc_read(filename,"dep_pr_ann",   trc%dep%pr_ann,   start=[1,nt],count=[n,1])
-        call nc_read(filename,"dep_d18O_ann", trc%dep%d18O_ann, start=[1,nt],count=[n,1])
-        call nc_read(filename,"dep_t2m_sum",  trc%dep%t2m_sum,  start=[1,nt],count=[n,1])
-        call nc_read(filename,"dep_pr_sum",   trc%dep%pr_sum,   start=[1,nt],count=[n,1])
-        call nc_read(filename,"dep_t2m_prann",trc%dep%t2m_prann,start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_t2m",  trc%dep%t2m,  start=[1,1,nt],count=[n,nmon,1])
+        call nc_read(filename,"dep_pr",   trc%dep%pr,   start=[1,1,nt],count=[n,nmon,1])
+        call nc_read(filename,"dep_d18O", trc%dep%d18O, start=[1,1,nt],count=[n,nmon,1])
+        call nc_read(filename,"dep_t2m_ann",   trc%dep%t2m_ann,   start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_pr_ann",    trc%dep%pr_ann,    start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_t2m_prann", trc%dep%t2m_prann, start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_d18O_ann",  trc%dep%d18O_ann,  start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_d18O_prann",trc%dep%d18O_prann,start=[1,nt],count=[n,1])
 
         ! Bookkeeping so newly deposited tracers get fresh ids and n_active is
         ! consistent with the restored active mask.
@@ -328,11 +337,11 @@ contains
 
         type(tracer_class), intent(OUT) :: trc_new 
         type(tracer_class), intent(IN) :: trc_ref, trc  
-        real(prec), intent(IN) :: dxy_max, dz_max  
+        real(wp), intent(IN) :: dxy_max, dz_max  
 
         ! Local variables 
         integer :: i, k  
-        real(prec) :: dist_xy(trc%par%n), dist_z(trc%par%n)
+        real(wp) :: dist_xy(trc%par%n), dist_z(trc%par%n)
 
         ! Store reference tracer information in new object 
         trc_new = trc_ref 
@@ -387,21 +396,21 @@ contains
         implicit none 
 
         type(tracer_class), intent(INOUT) :: trc 
-        real(prec), intent(IN) :: time 
-        real(prec), intent(IN) :: x(:), y(:), z(:) 
-        real(prec), intent(IN) :: z_srf(:,:), H(:,:)
-        real(prec), intent(IN) :: age(:,:,:) 
+        real(wp), intent(IN) :: time 
+        real(wp), intent(IN) :: x(:), y(:), z(:) 
+        real(wp), intent(IN) :: z_srf(:,:), H(:,:)
+        real(wp), intent(IN) :: age(:,:,:) 
         logical,    intent(IN) :: is_sigma 
         character(len=*), intent(IN), optional :: order 
-        real(prec), intent(IN), optional :: sigma_srf     ! Value at surface by default (1 or 0?)
+        real(wp), intent(IN), optional :: sigma_srf     ! Value at surface by default (1 or 0?)
 
         ! Local variables  
         character(len=3) :: idx_order 
         integer :: nx, ny, nz 
-        real(prec), allocatable :: x1(:), y1(:), z1(:)
-        real(prec), allocatable :: z_srf1(:,:), H1(:,:)
-        real(prec), allocatable :: age1(:,:,:) 
-        real(prec) :: zc(size(z))
+        real(wp), allocatable :: x1(:), y1(:), z1(:)
+        real(wp), allocatable :: z_srf1(:,:), H1(:,:)
+        real(wp), allocatable :: age1(:,:,:) 
+        real(wp) :: zc(size(z))
         logical :: rev_z 
 
         ! Determine order of indices (default ijk)
@@ -423,7 +432,7 @@ contains
 
         call tracer_reshape1D_vec(x, x1,rev=.FALSE.)
         call tracer_reshape1D_vec(y, y1,rev=.FALSE.)
-        call tracer_reshape1D_vec(real(zc,kind=prec),z1,rev=rev_z)
+        call tracer_reshape1D_vec(real(zc,kind=wp),z1,rev=rev_z)
         call tracer_reshape2D_field(idx_order,z_srf,z_srf1)
         call tracer_reshape2D_field(idx_order,H,H1)
         call tracer_reshape3D_field(idx_order,age,age1,rev_z=rev_z)
