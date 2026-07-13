@@ -81,7 +81,13 @@ contains
 
         call nc_write(path_out,"time",real(time,prec_wrt), dim1="time",start=[nt],count=[1],missing_value=mv_wrt)
         call nc_write(path_out,"n_active",trc%par%n_active,dim1="time",start=[nt],count=[1],missing_value=int(mv_wrt))
-        
+
+        ! Scalar clock state. Stored so a restart resumes the exact same dt and
+        ! time bookkeeping instead of reconstructing it (see tracer_read).
+        call nc_write(path_out,"dt",      real(trc%now%dt,prec_wrt),      dim1="time",start=[nt],count=[1],missing_value=mv_wrt,units="a")
+        call nc_write(path_out,"time_old",real(trc%now%time_old,prec_wrt),dim1="time",start=[nt],count=[1],missing_value=mv_wrt,units="years")
+        call nc_write(path_out,"time_dep",real(trc%now%time_dep,prec_wrt),dim1="time",start=[nt],count=[1],missing_value=mv_wrt,units="years")
+
         tmp = trc%now%x
         where(trc%now%x .ne. mv_wrt) tmp = trc%now%x*1e-3
         call nc_write(path_out,"x",tmp,dim1="pt",dim2="time", missing_value=mv_wrt, &
@@ -111,6 +117,20 @@ contains
                         start=[1,nt],count=[trc%par%n ,1])
         call nc_write(path_out,"H",real(trc%now%H,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="m")
+
+        ! Remaining now-state arrays. Not required to restart (active is derivable
+        ! and ax/ay/az are recomputed each update), but stored so the archive is a
+        ! complete, inspectable snapshot of the object; tracer_read reads them back.
+        call nc_write(path_out,"active",trc%now%active,dim1="pt",dim2="time", missing_value=int(mv_wrt), &
+                        start=[1,nt],count=[trc%par%n ,1])
+        call nc_write(path_out,"sigma",real(trc%now%sigma,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1])
+        call nc_write(path_out,"ax",real(trc%now%ax,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="m/a2")
+        call nc_write(path_out,"ay",real(trc%now%ay,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="m/a2")
+        call nc_write(path_out,"az",real(trc%now%az,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="m/a2")
 
         call nc_write(path_out,"id",trc%now%id,dim1="pt",dim2="time", missing_value=int(mv_wrt), &
                         start=[1,nt],count=[trc%par%n ,1])
@@ -164,6 +184,15 @@ contains
         call nc_write(path_out,"dep_d18O_ann",real(trc%dep%d18O_ann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="permil")
 
+        ! Remaining deposition tags. Previously left out (they do not affect
+        ! advection); stored now so the archive holds the complete dep record.
+        call nc_write(path_out,"dep_t2m_sum",real(trc%dep%t2m_sum,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="K")
+        call nc_write(path_out,"dep_pr_sum",real(trc%dep%pr_sum,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="m/a")
+        call nc_write(path_out,"dep_t2m_prann",real(trc%dep%t2m_prann,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+                        start=[1,nt],count=[trc%par%n ,1],units="K")
+
         return
 
     end subroutine tracer_write
@@ -177,15 +206,11 @@ contains
         ! allocation come from the namelist, not the archive. This routine only
         ! overlays the saved state, hence INTENT(INOUT).
         !
-        ! Everything that affects the continued trajectory is restored from the
-        ! archive: positions, velocities, H/T/thk, lineage (id, parent,
-        ! n_cloned) and the full deposition record. The remaining state is
-        ! reconstructed rather than stored, because it is either derivable or
-        ! recomputed before its next use:
-        !   active   <- 2 where id /= MV, else 0 (a completed step leaves no 1s)
-        !   ax/ay/az <- 0  (recomputed at the top of the next tracer_update,
-        !                   from the restored velocities, before calc_position)
-        !   sigma    <- MV (vestigial; never read)
+        ! The archive is a complete snapshot of the tracer object's array state,
+        ! so every field is restored directly rather than reconstructed:
+        ! positions, velocities, accelerations, sigma, H/T/thk, the active mask,
+        ! lineage (id, parent, n_cloned) and the full deposition record. Only
+        ! two par scalars are re-derived from the restored arrays:
         !   id_max   <- max stored id;  n_active <- count(active > 0)
         ! A restarted run therefore reproduces an uninterrupted one to within
         ! the archive's storage precision (single precision here, so exact bar
@@ -248,6 +273,11 @@ contains
         call nc_read(filename,"id",       trc%now%id,       start=[1,nt],count=[n,1])
         call nc_read(filename,"parent",   trc%now%parent,   start=[1,nt],count=[n,1])
         call nc_read(filename,"n_cloned", trc%now%n_cloned, start=[1,nt],count=[n,1])
+        call nc_read(filename,"active",   trc%now%active,   start=[1,nt],count=[n,1])
+        call nc_read(filename,"sigma",    trc%now%sigma,    start=[1,nt],count=[n,1])
+        call nc_read(filename,"ax",       trc%now%ax,       start=[1,nt],count=[n,1])
+        call nc_read(filename,"ay",       trc%now%ay,       start=[1,nt],count=[n,1])
+        call nc_read(filename,"az",       trc%now%az,       start=[1,nt],count=[n,1])
 
         ! --- Restore deposition record ---
         call nc_read(filename,"dep_time", trc%dep%time, start=[1,nt],count=[n,1])
@@ -266,24 +296,9 @@ contains
         call nc_read(filename,"dep_t2m_ann",  trc%dep%t2m_ann,  start=[1,nt],count=[n,1])
         call nc_read(filename,"dep_pr_ann",   trc%dep%pr_ann,   start=[1,nt],count=[n,1])
         call nc_read(filename,"dep_d18O_ann", trc%dep%d18O_ann, start=[1,nt],count=[n,1])
-
-        ! --- Reconstruct the state the archive does not carry ---
-        where (trc%now%id .ne. mvi)
-            trc%now%active = 2
-        elsewhere
-            trc%now%active = 0
-        end where
-
-        trc%now%sigma = MV
-        trc%now%ax    = 0.0
-        trc%now%ay    = 0.0
-        trc%now%az    = 0.0
-
-        ! Deposition tags the archive does not store (never written; they do not
-        ! affect advection). Set missing for a consistent record.
-        trc%dep%t2m_sum   = MV
-        trc%dep%pr_sum    = MV
-        trc%dep%t2m_prann = MV
+        call nc_read(filename,"dep_t2m_sum",  trc%dep%t2m_sum,  start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_pr_sum",   trc%dep%pr_sum,   start=[1,nt],count=[n,1])
+        call nc_read(filename,"dep_t2m_prann",trc%dep%t2m_prann,start=[1,nt],count=[n,1])
 
         ! Bookkeeping so newly deposited tracers get fresh ids and n_active is
         ! consistent with the restored active mask.
@@ -291,13 +306,14 @@ contains
         if (any(trc%now%id .ne. mvi)) trc%par%id_max = maxval(trc%now%id,mask=trc%now%id.ne.mvi)
         trc%par%n_active = count(trc%now%active .gt. 0)
 
-        ! The clock resumes at the restart time; dt/time_old are set on the next
-        ! tracer_update, time_dep/time_write are vestigial.
+        ! Restore the scalar clock state from the matched record. time and
+        ! time_write are the record's own time; dt/time_old/time_dep are read
+        ! back so the resumed run continues with identical bookkeeping.
         trc%now%time       = time
-        trc%now%time_old   = time
-        trc%now%time_dep   = time
         trc%now%time_write = time
-        trc%now%dt         = 0.0
+        call nc_read(filename,"dt",      trc%now%dt,       start=[nt],count=[1])
+        call nc_read(filename,"time_old",trc%now%time_old, start=[nt],count=[1])
+        call nc_read(filename,"time_dep",trc%now%time_dep, start=[nt],count=[1])
 
         return
 
