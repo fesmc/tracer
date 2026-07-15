@@ -1,0 +1,5 @@
+# Written by configme. config.toml is install-local — it records this
+# checkout's machine/compiler and install choices, so it is kept out of
+# the package repo. manifest.toml is portable (package + deps only) and
+# may be committed.
+config.toml

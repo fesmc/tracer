@@ -1,0 +1,5 @@
+# configme manifest for tracer.
+package = "tracer"
+deps = [
+    "fesm-utils",
+]
