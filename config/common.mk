@@ -21,6 +21,12 @@ ifeq ($(openmp), 1)
     FFLAGS += $(FFLAGS_OPENMP)
 endif
 
+# Position-independent code (make pic=1): needed when the static library is
+# linked into a shared library on Linux (e.g. yelmo's C API).
+ifeq ($(pic), 1)
+    FFLAGS += -fPIC
+endif
+
 # tracer build outputs, for downstream linking by a consumer (e.g. yelmo, which
 # nests this checkout at yelmo/tracer).
 TRACERROOT = ${CURDIR}

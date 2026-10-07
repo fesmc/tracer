@@ -10,6 +10,7 @@ libdir = libs
 # Command-line options at make call
 debug  ?= 0
 openmp ?= 0
+pic    ?= 0
 
 ## COMPILER CONFIGURATION ##
 # Assembled by `configme`. The fragment defines the compiler (FC, FFLAGS,
@@ -21,7 +22,7 @@ openmp ?= 0
 ## SHARED DEPENDENCY WIRING ##
 # Pulled in after the compiler/machine fragment so it can reference FFLAGS,
 # FFLAGS_OPENMP, LIB_NC and LFLAGS_EXTRA set there. Defines the FESMUTILS
-# paths, the openmp= build switch, and the final LFLAGS.
+# paths, the openmp= / pic= build switches, and the final LFLAGS.
 
 include config/common.mk
 
