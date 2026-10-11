@@ -218,6 +218,16 @@ contains
         trc%dep%x         = mv 
         trc%dep%y         = mv 
         trc%dep%z         = mv 
+        trc%dep%lon       = mv 
+        trc%dep%lat       = mv 
+        trc%dep%t2m       = mv 
+        trc%dep%pr        = mv 
+        trc%dep%d18O      = mv 
+        trc%dep%t2m_ann   = mv 
+        trc%dep%pr_ann    = mv 
+        trc%dep%t2m_prann = mv 
+        trc%dep%d18O_ann  = mv 
+        trc%dep%d18O_prann = mv 
 
         trc%par%id_max    = 0 
 
