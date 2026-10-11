@@ -198,8 +198,13 @@ contains
         call chk("uy",    trc%now%uy,    trc_r%now%uy,    trc%now%active, tol, n_mismatch)
         call chk("uz",    trc%now%uz,    trc_r%now%uz,    trc%now%active, tol, n_mismatch)
         call chk("H",     trc%now%H,     trc_r%now%H,     trc%now%active, tol, n_mismatch)
-        call chk("dep_time", trc%dep%time, trc_r%dep%time, trc%now%active, tol, n_mismatch)
         call chk("dep_z",    trc%dep%z,    trc_r%dep%z,    trc%now%active, tol, n_mismatch)
+
+        ! Deposition times are stored in double precision: the round trip is exact.
+        if (count(trc_r%dep%time .ne. trc%dep%time .and. trc%now%active .gt. 0) .gt. 0) then
+            write(0,*) "check_restart:: dep_time differs after restart."
+            n_mismatch = n_mismatch + 1
+        end if
 
         if (count(trc_r%now%id     .ne. trc%now%id     .and. trc%now%active.gt.0) .gt. 0 .or. &
             count(trc_r%now%parent .ne. trc%now%parent .and. trc%now%active.gt.0) .gt. 0 .or. &
