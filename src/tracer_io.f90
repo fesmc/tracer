@@ -42,7 +42,7 @@ contains
         call nc_create(path_out)
         call nc_write_dim(path_out,"pt",x=1,dx=1,nx=trc%par%n)
         call nc_write_dim(path_out,"month",x=1,dx=1,nx=nmon)
-        call nc_write_dim(path_out,"time",x=real(mv,prec_wrt),unlimited=.TRUE.)
+        call nc_write_dim(path_out,"time",x=real(mv,prec_time),unlimited=.TRUE.)
 
         return 
 
@@ -60,7 +60,8 @@ contains
         ! Local variables 
         integer :: nt
         integer, allocatable :: dims(:)
-        real(prec_wrt) :: time_in, mv_wrt   
+        real(prec_time) :: time_in
+        real(prec_wrt)  :: mv_wrt
         real(prec_wrt) :: tmp(size(trc%now%x))
         character(len=512) :: path_out 
         logical :: is_2D 
@@ -81,14 +82,14 @@ contains
         call nc_read(path_out,"time",time_in,start=[nt],count=[1])
         if (time_in .ne. MV .and. abs(time-time_in).gt.1e-2) nt = nt+1 
 
-        call nc_write(path_out,"time",real(time,prec_wrt), dim1="time",start=[nt],count=[1],missing_value=mv_wrt)
+        call nc_write(path_out,"time",time, dim1="time",start=[nt],count=[1],missing_value=real(mv_wrt,prec_time))
         call nc_write(path_out,"n_active",trc%par%n_active,dim1="time",start=[nt],count=[1],missing_value=int(mv_wrt))
 
         ! Scalar clock state. Stored so a restart resumes the exact same dt and
         ! time bookkeeping instead of reconstructing it (see tracer_read).
         call nc_write(path_out,"dt",      real(trc%now%dt,prec_wrt),      dim1="time",start=[nt],count=[1],missing_value=mv_wrt,units="a")
-        call nc_write(path_out,"time_old",real(trc%now%time_old,prec_wrt),dim1="time",start=[nt],count=[1],missing_value=mv_wrt,units="years")
-        call nc_write(path_out,"time_dep",real(trc%now%time_dep,prec_wrt),dim1="time",start=[nt],count=[1],missing_value=mv_wrt,units="years")
+        call nc_write(path_out,"time_old",trc%now%time_old,dim1="time",start=[nt],count=[1],missing_value=real(mv_wrt,prec_time),units="years")
+        call nc_write(path_out,"time_dep",trc%now%time_dep,dim1="time",start=[nt],count=[1],missing_value=real(mv_wrt,prec_time),units="years")
 
         tmp = trc%now%x
         where(trc%now%x .ne. mv_wrt) tmp = trc%now%x*1e-3
@@ -148,12 +149,12 @@ contains
                         start=[1,nt],count=[trc%par%n ,1])
 
         tmp = mv_wrt
-        where(trc%dep%time .ne. mv_wrt) tmp = time-trc%dep%time
+        where(trc%dep%time .ne. mv_wrt) tmp = real(time-trc%dep%time,prec_wrt)
         call nc_write(path_out,"age",tmp,dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="a")
 
         ! Write deposition information
-        call nc_write(path_out,"dep_time",real(trc%dep%time,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
+        call nc_write(path_out,"dep_time",trc%dep%time,dim1="pt",dim2="time", missing_value=real(mv_wrt,prec_time), &
                         start=[1,nt],count=[trc%par%n ,1],units="years")
         call nc_write(path_out,"dep_H",real(trc%dep%H,prec_wrt),dim1="pt",dim2="time", missing_value=mv_wrt, &
                         start=[1,nt],count=[trc%par%n ,1],units="m")
@@ -220,8 +221,8 @@ contains
         ! two par scalars are re-derived from the restored arrays:
         !   id_max   <- max stored id;  n_active <- count(active > 0)
         ! A restarted run therefore reproduces an uninterrupted one to within
-        ! the archive's storage precision (single precision here, so exact bar
-        ! the km<->m rounding on x/y).
+        ! the archive's storage precision (single precision here, times double,
+        ! so exact bar the km<->m rounding on x/y).
 
         implicit none
 
@@ -233,7 +234,7 @@ contains
         ! Local variables
         integer :: n, nt, nt_tot, mvi
         integer, allocatable :: dims(:)
-        real(prec_wrt), allocatable :: time_all(:)
+        real(prec_time), allocatable :: time_all(:)
         logical :: is_2D
 
         is_2D = .FALSE.
@@ -255,8 +256,8 @@ contains
         allocate(time_all(nt_tot))
         call nc_read(filename,"time",time_all,start=[1],count=[nt_tot])
 
-        nt = minloc(abs(time_all-real(time,prec_wrt)),dim=1)
-        if (abs(time_all(nt)-real(time,prec_wrt)) .gt. 1e-2) then
+        nt = minloc(abs(time_all-time),dim=1)
+        if (abs(time_all(nt)-time) .gt. 1e-2) then
             write(0,*) "tracer_read:: error: time not found in "//trim(filename)//": ", time
             error stop
         end if
@@ -396,7 +397,7 @@ contains
         implicit none 
 
         type(tracer_class), intent(INOUT) :: trc 
-        real(wp), intent(IN) :: time 
+        real(prec_time), intent(IN) :: time 
         real(wp), intent(IN) :: x(:), y(:), z(:) 
         real(wp), intent(IN) :: z_srf(:,:), H(:,:)
         real(wp), intent(IN) :: age(:,:,:) 
