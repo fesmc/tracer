@@ -195,7 +195,8 @@ contains
         type(tracer_stats_class), intent(INOUT) :: st
         integer,    intent(IN) :: active(:)
         real(wp), intent(IN) :: px(:), py(:), dpth(:), H(:)
-        real(wp), intent(IN) :: dep_time(:), dep_z(:), dep_lon(:), dep_lat(:)
+        real(prec_time), intent(IN) :: dep_time(:)
+        real(wp), intent(IN) :: dep_z(:), dep_lon(:), dep_lat(:)
         real(wp), intent(IN) :: dep_t2m_ann(:), dep_pr_ann(:), dep_d18O_ann(:)
 
         integer :: nx, ny, ndepth, niso
@@ -291,12 +292,12 @@ contains
 
         elemental function to_ka(t) result(t_ka)
             ! Convert a deposition time [years] to ka, preserving MV.
-            real(wp), intent(IN) :: t
+            real(prec_time), intent(IN) :: t
             real(wp) :: t_ka
             if (t .eq. MV) then
                 t_ka = MV
             else
-                t_ka = t*1e-3
+                t_ka = real(t*1e-3_dp,wp)
             end if
         end function to_ka
 
