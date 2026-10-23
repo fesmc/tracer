@@ -78,7 +78,8 @@ full profile, then writes three figures with `analysis/plot_RH2003.jl`
 Precision is a compile-time choice: `prec` in `src/tracer_precision.f90` is `sp`,
 and it is stamped into every output filename. For a double-precision sweep set
 `prec = dp`, `make clean && make profile`, and rerun — the `dp` outputs land
-beside the `sp` ones rather than over them.
+beside the `sp` ones rather than over them. Model and deposition times are
+double precision (`prec_time`) in either case, also in the archive.
 
 **Greenland** advects tracers through a Yelmo ice-sheet state on the 16 km
 grid, read from `data/initmip-grl-16km/yelmo_restart.nc`. The restart carries no

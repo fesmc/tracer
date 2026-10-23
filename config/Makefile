@@ -102,12 +102,16 @@ obj_tracer =	$(objdir)/tracer_precision.o \
 ##
 ###############################################
 
-# Static library compilation
-tracer-static: $(obj_bspline) $(obj_tracer)
-	ar rc $(objdir)/libtracer.a $(obj_bspline) $(obj_tracer)
-	ranlib $(objdir)/libtracer.a
+# Static library compilation. The archive is a file target, so its mtime only
+# changes when an object does (hosts such as yelmo depend on it to rebuild
+# after a type change).
+tracer-static: $(objdir)/libtracer.a
+
+$(objdir)/libtracer.a: $(obj_bspline) $(obj_tracer)
+	ar rc $@ $(obj_bspline) $(obj_tracer)
+	ranlib $@
 	@echo " "
-	@echo "    $(objdir)/libtracer.a is ready."
+	@echo "    $@ is ready."
 	@echo " "
 
 # Benchmark: Rybak & Huybrechts (2003) idealized ice-divide profile.

@@ -9,7 +9,7 @@ module tracer_precision
 
     ! Working precision (formerly `prec`)
     integer,  parameter :: wp        = sp
-    integer,  parameter :: prec_time = sp
+    integer,  parameter :: prec_time = dp   ! model time (sp spacing is 0.016 yr at 1e5 yr)
     integer,  parameter :: prec_wrt  = sp
 
 end module tracer_precision

@@ -26,7 +26,7 @@ module tracer3D
         integer :: n, n_active, n_max_dep, id_max
         logical :: is_sigma                     ! Is the defined z-axis in sigma coords
         logical :: is_profile                   ! Is this a 2D (x-z) domain with a ghost y-axis
-        real(prec_time) :: dt, dt_dep, dt_write
+        real(wp) :: dt, dt_dep, dt_write
         real(wp) :: H_min                     ! Minimum ice thickness to track (m)
         real(wp) :: depth_max                 ! Maximum depth of tracer (fraction)
         real(wp) :: U_max                     ! Maximum horizontal velocity of tracer to track (m/a)
@@ -57,7 +57,7 @@ module tracer3D
         ! Gridded statistics (Eulerian output). Read only when stats = .TRUE.;
         ! see tracer_stats. depth_norm is built as n_depth uniform levels.
         logical            :: stats
-        real(prec_time)    :: dt_write_stats
+        real(wp)           :: dt_write_stats
         integer            :: n_depth
         real(prec_wrt), allocatable :: time_iso(:)
         real(prec_wrt)     :: dt_iso
@@ -67,7 +67,7 @@ module tracer3D
     type tracer_state_class
         real(prec_time) :: time, time_old
         real(prec_time) :: time_dep, time_write 
-        real(prec_time) :: dt  
+        real(wp)        :: dt  
         integer, allocatable :: active(:), id(:)
         integer, allocatable :: parent(:)            ! id of the parent tracer if this is a clone, 0 if an original
         integer, allocatable :: n_cloned(:)          ! number of clones already spawned from this tracer
@@ -83,7 +83,7 @@ module tracer3D
 
     type tracer_dep_class
         ! Standard deposition information (time and place)
-        real(wp), allocatable :: time(:)
+        real(prec_time), allocatable :: time(:)
         real(wp), allocatable :: H(:)
         real(wp), allocatable :: x(:), y(:), z(:)
         real(wp), allocatable :: lon(:), lat(:)
@@ -218,6 +218,16 @@ contains
         trc%dep%x         = mv 
         trc%dep%y         = mv 
         trc%dep%z         = mv 
+        trc%dep%lon       = mv 
+        trc%dep%lat       = mv 
+        trc%dep%t2m       = mv 
+        trc%dep%pr        = mv 
+        trc%dep%d18O      = mv 
+        trc%dep%t2m_ann   = mv 
+        trc%dep%pr_ann    = mv 
+        trc%dep%t2m_prann = mv 
+        trc%dep%d18O_ann  = mv 
+        trc%dep%d18O_prann = mv 
 
         trc%par%id_max    = 0 
 
@@ -300,7 +310,7 @@ contains
         ! Update current time and time step
         trc%now%time_old = trc%now%time 
         trc%now%time     = time 
-        trc%now%dt       = real(dble(trc%now%time) - dble(trc%now%time_old),prec_time)
+        trc%now%dt       = real(trc%now%time - trc%now%time_old,wp)
 
         ! Update record of last deposition time if dep_now
         if (dep_now) trc%now%time_dep = trc%now%time 
@@ -1002,7 +1012,7 @@ contains
         real(wp),   intent(INOUT) :: x, y, z 
         real(wp),   intent(IN)    :: ux, uy, uz 
         real(wp),   intent(IN)    :: ax, ay, az 
-        real(prec_time), intent(IN)    :: dt 
+        real(wp),        intent(IN)    :: dt 
         integer,         intent(IN)    :: active 
 
         if (active .gt. 0) then 
