@@ -3,5 +3,5 @@
 # dependency tags.
 package = "tracer"
 deps = [
-    "fesm-utils:v1.4",
+    "fesm-utils:stable",
 ]
