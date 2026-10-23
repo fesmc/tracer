@@ -1,5 +1,7 @@
 # configme manifest for tracer.
+# Pins: stable (== main) for every dependency; a tagged release pins the
+# dependency tags.
 package = "tracer"
 deps = [
-    "fesm-utils",
+    "fesm-utils:stable",
 ]
